@@ -1,41 +1,45 @@
 // Volume.cpp
 #include "Volume.hpp"
-#include <fstream>
 #include <algorithm>
+#include <fstream>
 #include <stdexcept>
 
-Volume::Volume(const std::string& filename, int nx, int ny, int nz) 
-    : nx_(nx), ny_(ny), nz_(nz) 
+Volume::Volume(const std::string& filename, int nx, int ny, int nz)
+    : nx_(nx), ny_(ny), nz_(nz)
 {
-    const size_t expected_size = nx * ny * nz * sizeof(float);
-    std::ifstream file(filename, std::ios::binary);
-    
-    if(!file) throw std::runtime_error("Cannot open file: " + filename);
-    
-    file.seekg(0, std::ios::end);
-    size_t actual_size = file.tellg();
-    file.seekg(0, std::ios::beg);
+	const size_t expected_size = nx * ny * nz * sizeof(float);
+	std::ifstream file(filename, std::ios::binary);
 
-    if(actual_size != expected_size)
-        throw std::runtime_error("File size mismatch for " + filename);
+	if (!file)
+		throw std::runtime_error("Cannot open file: " + filename);
 
-    data_.resize(nx * ny * nz);
-    file.read(reinterpret_cast<char*>(data_.data()), expected_size);
-    
-    auto [min_it, max_it] = std::minmax_element(data_.begin(), data_.end());
-    global_min_ = *min_it;
-    global_max_ = *max_it;
-    reset_window();
+	file.seekg(0, std::ios::end);
+	size_t actual_size = file.tellg();
+	file.seekg(0, std::ios::beg);
+
+	if (actual_size != expected_size)
+		throw std::runtime_error("File size mismatch for " + filename);
+
+	data_.resize(nx * ny * nz);
+	file.read(reinterpret_cast<char*>(data_.data()), expected_size);
+
+	auto [min_it, max_it] = std::minmax_element(data_.begin(), data_.end());
+	global_min_ = *min_it;
+	global_max_ = *max_it;
+	reset_window();
 }
 
-float Volume::at(int x, int y, int z) const {
-    if(x < 0 || x >= nx_ || y < 0 || y >= ny_ || z < 0 || z >= nz_)
-        return 0.0f;
-    return data_[z * nx_ * ny_ + y * nx_ + x];
+float Volume::at(int x, int y, int z) const
+{
+	if (x < 0 || x >= nx_ || y < 0 || y >= ny_ || z < 0 || z >= nz_)
+		return 0.0f;
+	return data_[z * nx_ * ny_ + y * nx_ + x];
 }
 
-void Volume::set_window(float min, float max) {
-    window_min_ = std::max(min, global_min_);
-    window_max_ = std::min(max, global_max_);
-    if(window_min_ >= window_max_) window_max_ = window_min_ + 1e-6f;
+void Volume::set_window(float min, float max)
+{
+	window_min_ = std::max(min, global_min_);
+	window_max_ = std::min(max, global_max_);
+	if (window_min_ >= window_max_)
+		window_max_ = window_min_ + 1e-6f;
 }
