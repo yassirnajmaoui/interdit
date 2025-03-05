@@ -30,13 +30,19 @@ public:
 	explicit Viewer(const std::vector<std::shared_ptr<Volume>>& volumes);
 	~Viewer();
 	void run();
+	void handle_key_press(XKeyEvent& event);
 
 private:
-	void draw_frame() const;
+	void handle_resize(XConfigureEvent& event);
+	void draw_frame();
+	void handle_button_press(XButtonEvent& event);
+	void handle_button_release(XButtonEvent& event);
+	void handle_motion(XMotionEvent& event);
 	void handle_events(XEvent& event);
 	void update_colormap();
 	uint32_t value_to_color(float value) const;
 	int get_max_slice() const;
+	void adjust_window_level(float delta);
 
 	Display* display_;
 	Window window_;
@@ -63,5 +69,10 @@ private:
 		int pan_x = 0;
 		int pan_y = 0;
 		bool sync_colormap = false;
+		bool dragging = false;
+		int drag_start_x = 0;
+		int drag_start_y = 0;
+		int pan_start_x = 0;
+		int pan_start_y = 0;
 	} state_;
 };
