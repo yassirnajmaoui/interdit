@@ -27,7 +27,7 @@ extern "C"
 
 class Viewer {
 public:
-	Viewer(const std::vector<std::shared_ptr<Volume>>& volumes);
+	explicit Viewer(const std::vector<std::shared_ptr<Volume>>& volumes);
 	~Viewer();
 	void run();
 
@@ -47,12 +47,27 @@ private:
 	void create_ui();
 	void handle_events();
 	void draw_ui();
+	void draw_widgets();
 	void update_colormap();
-	void draw_volume(const ViewState& view);
+	void handle_drag();
+	void handle_zoom();
+	void draw_volume(const ViewState& view, int y_base);
 
 	Display* display_;
 	Window window_;
 	GC gc_;
 	std::vector<ViewState> views_;
 	bool running_ = true;
+
+	Pixmap buffer_;
+	int toolbar_height_ = 40;
+	int view_spacing_ = 10;
+
+	struct InteractionState {
+		bool dragging = false;
+		int start_x = 0;
+		int start_y = 0;
+		int current_x = 0;
+		int current_y = 0;
+	} interaction_;
 };

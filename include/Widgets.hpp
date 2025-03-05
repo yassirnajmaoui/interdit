@@ -14,11 +14,11 @@ public:
 	std::string get_text() const { return text_; }
 	bool has_focus() const { return has_focus_; }
 
+	int x_, y_, width_, height_;
 private:
 	void update_cursor_blink() const;
 	bool is_numeric_input() const;
 
-	int x_, y_, width_, height_;
 	std::string text_;
 	bool has_focus_ = false;
 	mutable bool cursor_visible_ = false;
@@ -34,10 +34,10 @@ public:
 	void set_toggle(bool is_toggle);
 	bool is_pressed() const { return state_ == ButtonState::PRESSED; }
 
+	int x_, y_, width_, height_;
 private:
 	enum class ButtonState { NORMAL, PRESSED, HOVER };
 
-	int x_, y_, width_, height_;
 	std::string label_;
 	ButtonState state_ = ButtonState::NORMAL;
 	std::function<void()> callback_;
