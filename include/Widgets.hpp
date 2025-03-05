@@ -1,11 +1,11 @@
 #pragma once
 #include <X11/Xlib.h>
-#include <chrono>
-#include <functional>
 #include <string>
+#include <functional>
+#include <chrono>
+#include <memory>
 
-class TextInput
-{
+class TextInput {
 public:
 	TextInput(int x, int y, int width, int height);
 	void draw(Display* dpy, Window window, GC gc) const;
@@ -25,16 +25,13 @@ private:
 	mutable std::chrono::time_point<std::chrono::system_clock> last_blink_time_;
 };
 
-
 class Button {
 public:
 	Button(int x, int y, int width, int height, const std::string& label);
-
 	void draw(Display* dpy, Window window, GC gc) const;
 	bool handle_event(const XEvent& event);
 	void set_callback(std::function<void()> callback);
 	void set_toggle(bool is_toggle);
-	void set_pressed(bool);
 	bool is_pressed() const { return state_ == ButtonState::PRESSED; }
 
 private:
@@ -47,4 +44,3 @@ private:
 	bool is_toggle_ = false;
 	bool toggle_state_ = false;
 };
-
