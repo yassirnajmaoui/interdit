@@ -9,56 +9,6 @@
 #include <unistd.h>
 
 
-void Viewer::handle_events(XEvent& event)
-{
-	switch (event.type)
-	{
-	case Expose:
-		if (event.xexpose.count == 0)
-			draw_frame();
-		break;
-
-	case KeyPress:
-	{
-		KeySym key = XLookupKeysym(&event.xkey, 0);
-		int step = 1;
-
-		// Handle slice navigation
-		if (key == XK_Left)
-			state_.slice = std::max(0, state_.slice - step);
-		if (key == XK_Right)
-			state_.slice = std::min(get_max_slice(), state_.slice + step);
-
-		// Plane switching
-		if (key == XK_x)
-			state_.plane = Plane::XY;
-		if (key == XK_y)
-			state_.plane = Plane::XZ;
-		if (key == XK_z)
-			state_.plane = Plane::YZ;
-
-		// Zoom controls
-		if (key == XK_plus)
-			state_.zoom *= 1.2;
-		if (key == XK_minus)
-			state_.zoom = std::max(0.1f, state_.zoom / 1.2f);
-		break;
-	}
-
-	case ButtonPress:
-		// Store initial mouse position for panning
-		break;
-
-	case ConfigureNotify:
-		// Handle window resize
-		XFreePixmap(display_, buffer_);
-		buffer_ = XCreatePixmap(
-		    display_, window_, event.xconfigure.width, event.xconfigure.height,
-		    DefaultDepth(display_, DefaultScreen(display_)));
-		break;
-	}
-}
-
 Viewer::Viewer(const std::vector<std::shared_ptr<Volume>>& volumes)
     : volumes_(volumes)
 {
@@ -118,29 +68,138 @@ void Viewer::run()
 
 	while (running)
 	{
-		// Process events
-		while (XPending(display_))
-		{
-			XNextEvent(display_, &event);
-			switch (event.type)
-			{
-			case KeyPress: handle_key_press(event.xkey); break;
-			case ButtonPress: handle_button_press(event.xbutton); break;
-			case MotionNotify: handle_motion(event.xmotion); break;
-			case ButtonRelease: handle_button_release(event.xbutton); break;
-			case Expose: draw_frame(); break;
-			case ConfigureNotify: handle_resize(event.xconfigure); break;
-			case ClientMessage:
-				if (static_cast<Atom>(event.xclient.data.l[0]) ==
-				    XInternAtom(display_, "WM_DELETE_WINDOW", False))
-					running = false;
-				break;
-			}
-		}
+		handle_events();
+		update_colormap_from_inputs();
+		draw_frame();
 
 		// Continuous rendering
 		draw_frame();
 		std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
+	}
+}
+// Create UI layout
+void Viewer::create_layout()
+{
+	// Create buttons for each view
+	const int button_spacing = 10;
+	int x = button_spacing;
+
+	for (auto& view : views)
+	{
+		// Create buttons
+		view.zoom_button = std::make_unique<Button>(x, 10, 80, 30, "Zoom");
+		view.drag_button = std::make_unique<Button>(x + 90, 10, 80, 30, "Drag");
+
+		// Set as toggle buttons
+		view.zoom_button->set_toggle(true);
+		view.drag_button->set_toggle(true);
+
+		// Set callbacks
+		view.zoom_button->set_callback(
+		    [this, &view]
+		    {
+			    view.zoom_mode = view.zoom_button->is_pressed();
+			    view.drag_button->set_pressed(false);
+		    });
+
+		view.drag_button->set_callback(
+		    [this, &view]
+		    {
+			    view.drag_mode = view.drag_button->is_pressed();
+			    view.zoom_button->set_pressed(false);
+		    });
+
+		x += 180 + button_spacing;
+	}
+}
+
+void Viewer::update_colormap_from_inputs()
+{
+	for (auto& view : views)
+	{
+		try
+		{
+			float min = std::stof(view.min_input->get_text());
+			float max = std::stof(view.max_input->get_text());
+			view.volume->set_window(min, max);
+		}
+		catch (...)
+		{
+			// Handle invalid input
+		}
+	}
+}
+
+// Handle events
+void Viewer::handle_events()
+{
+	XEvent event;
+	while (XPending(display_))
+	{
+		XNextEvent(display_, &event);
+
+		// Handle widgets first
+		for (auto& view : views)
+		{
+			if (view.min_input->handle_event(event) ||
+			    view.max_input->handle_event(event) ||
+			    view.zoom_button->handle_event(event) ||
+			    view.drag_button->handle_event(event))
+			{
+				return;
+			}
+		}
+
+		// Handle canvas events
+		switch (event.type)
+		{
+		case ButtonPress:
+			if (event.xbutton.button == Button1)
+			{
+				// Start rubber band selection
+				if (views[current_view].zoom_mode)
+				{
+					views[current_view].sel_x1 = event.xbutton.x;
+					views[current_view].sel_y1 = event.xbutton.y;
+					rubber_band_active = true;
+				}
+			}
+			break;
+
+		case MotionNotify:
+			if (rubber_band_active)
+			{
+				views[current_view].sel_x2 = event.xmotion.x;
+				views[current_view].sel_y2 = event.xmotion.y;
+			}
+			break;
+
+		case ButtonRelease:
+			if (event.xbutton.button == Button1 && rubber_band_active)
+			{
+				// Calculate zoom area
+				auto& view = views[current_view];
+				int w = view.sel_x2 - view.sel_x1;
+				int h = view.sel_y2 - view.sel_y1;
+				view.zoom = std::min(view.volume->nx() / float(w),
+				                     view.volume->ny() / float(h));
+				view.pan_x = view.sel_x1;
+				view.pan_y = view.sel_y1;
+				rubber_band_active = false;
+			}
+			break;
+		}
+	}
+}
+
+// Draw rubber band selection
+void Viewer::draw_ui()
+{
+	if (rubber_band_active)
+	{
+		auto& view = views[current_view];
+		XDrawRectangle(display_, window_, gc_, view.sel_x1, view.sel_y1,
+		               view.sel_x2 - view.sel_x1, view.sel_y2 - view.sel_y1);
 	}
 }
 

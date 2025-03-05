@@ -14,6 +14,7 @@ add_executable(interdit
     src/main.cpp
     src/Volume.cpp
     src/Viewer.cpp
+    src/Widgets.cpp
 )
 
 target_include_directories(interdit PRIVATE 
