@@ -1,10 +1,12 @@
 // Viewer.cpp
 #include "Viewer.hpp"
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <unistd.h>
 
-// Constructor and destructor remain the same...
 
 void Viewer::handle_events(XEvent& event)
 {
@@ -57,18 +59,58 @@ void Viewer::handle_events(XEvent& event)
 }
 
 Viewer::Viewer(const std::vector<std::shared_ptr<Volume>>& volumes)
-    : volumes_(volumes)
+	: volumes_(volumes)
 {
+	display_ = XOpenDisplay(nullptr);
+	if(!display_) throw std::runtime_error("Cannot open X display");
+
+	int screen = DefaultScreen(display_);
+	Window root = RootWindow(display_, screen);
+
+	// Create window
+	window_ = XCreateSimpleWindow(display_, root, 0, 0, 800, 600, 1,
+								BlackPixel(display_, screen),
+								WhitePixel(display_, screen));
+
+	// Create graphics context
+	XGCValues gcv;
+	gcv.foreground = BlackPixel(display_, screen);
+	gcv.background = WhitePixel(display_, screen);
+	gc_ = XCreateGC(display_, window_, GCForeground | GCBackground, &gcv);
+
+	// Create double buffer
+	buffer_ = XCreatePixmap(display_, window_, 800, 600, DefaultDepth(display_, screen));
+
+	// Allocate image buffer
+	image_buffer_.resize(800 * 600 * 4); // 32-bit RGBA
+	ximage_ = XCreateImage(display_, DefaultVisual(display_, screen),
+						  DefaultDepth(display_, screen), ZPixmap, 0,
+						  reinterpret_cast<char*>(image_buffer_.data()),
+						  800, 600, 32, 0);
+
+	XSelectInput(display_, window_, ExposureMask | KeyPressMask | ButtonPressMask | StructureNotifyMask);
+	XMapWindow(display_, window_);
 }
 
-Viewer::~Viewer()
-{
-	// TODO
+Viewer::~Viewer() {
+	XDestroyImage(ximage_);
+	XFreePixmap(display_, buffer_);
+	XFreeGC(display_, gc_);
+	XDestroyWindow(display_, window_);
+	XCloseDisplay(display_);
 }
 
-void Viewer::run()
-{
-	// TODO
+void Viewer::run() {
+	while(true) {
+		XEvent event;
+		if(XPending(display_)) {
+			XNextEvent(display_, &event);
+			handle_events(event);
+		}
+		draw_frame();
+		XFlush(display_);
+		usleep(10000); // 10ms
+	}
 }
 
 void Viewer::draw_frame() const
