@@ -4,27 +4,29 @@ project(interdit LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Verify FLTK installation
-find_package(FLTK CONFIG REQUIRED NO_MODULE)
-find_package(X11 REQUIRED)
-
-add_executable(interdit
-    src/main.cpp
+# Find fltk-config script
+find_program(FLTK_CONFIG fltk-config
+    HINTS /usr/local/bin /usr/bin /opt/local/bin
+    DOC "FLTK configuration script"
 )
 
-target_include_directories(interdit PRIVATE 
-    include
-    ${FLTK_INCLUDE_DIR}
-    ${X11_INCLUDE_DIR}
+if (NOT FLTK_CONFIG)
+    message(FATAL_ERROR "fltk-config not found! Install FLTK development package")
+endif ()
+
+# Create executable
+set(INTERDIT_EXECUTABLE_SOURCES
+    ../src/interdit.cpp
 )
 
-target_link_libraries(interdit PRIVATE
-    fltk
-    ${FLTK_IMAGES_LIBRARY}
-    ${X11_LIBRARIES}
-    ${XFIXES_LIBRARY}
-    ${XRENDER_LIBRARY}
-    ${XCURSOR_LIBRARY}
-    ${XINERAMA_LIBRARY}
-    pthread
+set(INTERDIT_EXECUTABLE_NAME interdit)
+
+add_custom_target(${INTERDIT_EXECUTABLE_NAME})
+
+add_custom_command(
+    TARGET ${INTERDIT_EXECUTABLE_NAME}
+    COMMAND ${FLTK_CONFIG} --compile ${INTERDIT_EXECUTABLE_SOURCES}
+    DEPENDS ${INTERDIT_EXECUTABLE_SOURCES} ../include/CLI11.hpp  # List all headers
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
+
