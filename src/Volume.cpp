@@ -40,6 +40,4 @@ void Volume::set_window(float min, float max)
 {
 	window_min_ = min;
 	window_max_ = max;
-	if (window_min_ >= window_max_)
-		window_max_ = window_min_ + 1e-6f;
 }

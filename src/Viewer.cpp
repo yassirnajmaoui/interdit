@@ -330,12 +330,6 @@ void Viewer::draw_volume(const ViewState& view, int x_base, int y_base)
 	const float min_value = view.volume->window_min();
 	const float max_value = view.volume->window_max();
 
-	if(min_value >= max_value)
-	{
-		std::cerr << "Invalid minimum and maximum values" << std::endl;
-		return;
-	}
-
 	for (int y = 0; y < h; y++)
 	{
 		for (int x = 0; x < w; x++)
