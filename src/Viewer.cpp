@@ -124,7 +124,7 @@ void Viewer::handle_events()
 			}
 		}
 
-		if (widget_handled)
+		if (!widget_handled)
 			continue;
 
 		// Handle canvas interactions
@@ -197,7 +197,7 @@ void Viewer::draw_ui()
 		}
 
 		// Position and draw scrollbar
-		view.scrollbar->x_ = x_pos - scrollbar_width_ - image_spacing_;
+		view.scrollbar->x_ = x_pos - scrollbar_width_;
 		view.scrollbar->y_ = y_base;
 		view.scrollbar->height_ = img_height;
 		view.scrollbar->draw(display_, buffer_, gc_);
