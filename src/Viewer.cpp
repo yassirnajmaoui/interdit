@@ -42,6 +42,10 @@ Viewer::Viewer(const std::vector<std::shared_ptr<Volume>>& volumes)
 
 	XMapWindow(display_, window_);
 
+	XSetWindowAttributes attrs;
+	attrs.backing_store = WhenMapped;
+	XChangeWindowAttributes(display_, window_, CWBackingStore, &attrs);
+
 	buffer_ = XCreatePixmap(display_, window_, 800, 600,
 	                        DefaultDepth(display_, screen));
 }
@@ -89,20 +93,28 @@ void Viewer::handle_events()
 				view.current_slice = view.scrollbar->get_value();
 				widget_handled = true;
 			}
-			if (view.xy_radio->handle_event(event))
-			{
+
+			// Radio buttons
+			if(view.xy_radio->handle_event(event)) {
+				view.xy_radio->set_selected(true);
+				view.xz_radio->set_selected(false);
+				view.yz_radio->set_selected(false);
 				view.plane = ViewState::Plane::XY;
 				update_scrollbar_range(view);
 				widget_handled = true;
 			}
-			if (view.xz_radio->handle_event(event))
-			{
+			if(view.xz_radio->handle_event(event)) {
+				view.xy_radio->set_selected(false);
+				view.xz_radio->set_selected(true);
+				view.yz_radio->set_selected(false);
 				view.plane = ViewState::Plane::XZ;
 				update_scrollbar_range(view);
 				widget_handled = true;
 			}
-			if (view.yz_radio->handle_event(event))
-			{
+			if(view.yz_radio->handle_event(event)) {
+				view.xy_radio->set_selected(false);
+				view.xz_radio->set_selected(false);
+				view.yz_radio->set_selected(true);
 				view.plane = ViewState::Plane::YZ;
 				update_scrollbar_range(view);
 				widget_handled = true;
@@ -152,11 +164,8 @@ void Viewer::handle_events()
 
 void Viewer::draw_ui()
 {
-	XClearWindow(display_, window_);
-
 	// Draw to buffer first
-	XSetForeground(display_, gc_,
-	               WhitePixel(display_, DefaultScreen(display_)));
+	XSetForeground(display_, gc_, WhitePixel(display_, DefaultScreen(display_)));
 	XFillRectangle(display_, buffer_, gc_, 0, 0, 800, 600);
 
 	// Draw images horizontally

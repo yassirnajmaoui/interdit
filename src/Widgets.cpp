@@ -174,87 +174,115 @@ void Button::set_toggle(bool is_toggle)
 }
 
 // Scrollbar implementation
-Scrollbar::Scrollbar(int x, int y, int height)
-    : x_(x), y_(y), height_(height) {}
-
-void Scrollbar::draw(Display* dpy, Window window, GC gc) const {
-    // Draw track
-    XSetForeground(dpy, gc, 0x888888);
-    XFillRectangle(dpy, window, gc, x_, y_, 15, height_);
-
-    // Calculate thumb position
-    float ratio = static_cast<float>(current_value_ - min_value_) / (max_value_ - min_value_);
-    int thumb_y = y_ + ratio * (height_ - 20);
-
-    // Draw thumb
-    XSetForeground(dpy, gc, 0x444444);
-    XFillRectangle(dpy, window, gc, x_, thumb_y, 15, 20);
+Scrollbar::Scrollbar(int x, int y, int height) : x_(x), y_(y), height_(height)
+{
 }
 
-bool Scrollbar::handle_event(const XEvent& event) {
-    if(event.type == ButtonPress && event.xbutton.button == Button1) {
-        int click_y = event.xbutton.y - y_;
-        float ratio = static_cast<float>(click_y) / height_;
-        current_value_ = min_value_ + ratio * (max_value_ - min_value_);
-        dragging_ = true;
-        return true;
-    }
+void Scrollbar::draw(Display* dpy, Window window, GC gc) const
+{
+	// Draw track
+	XSetForeground(dpy, gc, 0x888888);
+	XFillRectangle(dpy, window, gc, x_, y_, 15, height_);
 
-    if(event.type == MotionNotify && dragging_) {
-        int new_y = event.xmotion.y - y_;
-        float ratio = std::max(0.0f, std::min(1.0f, static_cast<float>(new_y)/height_));
-        current_value_ = min_value_ + ratio * (max_value_ - min_value_);
-        return true;
-    }
+	// Calculate thumb position
+	float ratio = static_cast<float>(current_value_ - min_value_) /
+	              (max_value_ - min_value_);
+	int thumb_y = y_ + ratio * (height_ - 20);
 
-    if(event.type == ButtonRelease && event.xbutton.button == Button1) {
-        dragging_ = false;
-        return true;
-    }
-
-    return false;
+	// Draw thumb
+	XSetForeground(dpy, gc, 0x444444);
+	XFillRectangle(dpy, window, gc, x_, thumb_y, 15, 20);
 }
 
-void Scrollbar::set_range(int min, int max) {
-    min_value_ = min;
-    max_value_ = max;
-    current_value_ = std::clamp(current_value_, min, max);
+bool Scrollbar::handle_event(const XEvent& event)
+{
+	const int scrollbar_width = 15;
+
+	// Check if within horizontal bounds
+	bool in_x =
+	    (event.xbutton.x >= x_) && (event.xbutton.x <= x_ + scrollbar_width);
+
+	if (event.type == ButtonPress && event.xbutton.button == Button1 && in_x)
+	{
+		int click_y = event.xbutton.y - y_;
+		float ratio = static_cast<float>(click_y) / height_;
+		current_value_ = min_value_ + ratio * (max_value_ - min_value_);
+		current_value_ = std::clamp(current_value_, min_value_, max_value_);
+		dragging_ = true;
+		return true;
+	}
+
+	if (event.type == MotionNotify && dragging_ && in_x)
+	{
+		int new_y = event.xmotion.y - y_;
+		float ratio =
+		    std::max(0.0f, std::min(1.0f, static_cast<float>(new_y) / height_));
+		current_value_ = min_value_ + ratio * (max_value_ - min_value_);
+		return true;
+	}
+
+	if (event.type == ButtonRelease && event.xbutton.button == Button1)
+	{
+		dragging_ = false;
+		return in_x;  // Only return true if released in scrollbar area
+	}
+
+	return false;
+}
+
+void Scrollbar::set_range(int min, int max)
+{
+	min_value_ = min;
+	max_value_ = max;
+	current_value_ = std::clamp(current_value_, min, max);
 }
 
 // RadioButton implementation
 RadioButton::RadioButton(int x, int y, const std::string& label)
-    : x_(x), y_(y), label_(label) {}
-
-void RadioButton::draw(Display* dpy, Window window, GC gc) const {
-    // Draw circle
-    XSetForeground(dpy, gc, 0x000000);
-    XDrawArc(dpy, window, gc, x_, y_, 16, 16, 0, 360*64);
-
-    if(selected_) {
-        XFillArc(dpy, window, gc, x_+4, y_+4, 8, 8, 0, 360*64);
-    }
-
-    // Draw label
-    XFontStruct* font = XLoadQueryFont(dpy, "fixed");
-    if(font) {
-        XSetFont(dpy, gc, font->fid);
-        XDrawString(dpy, window, gc, x_+20, y_+12, label_.c_str(), label_.length());
-        XFreeFont(dpy, font);
-    }
+    : x_(x), y_(y), label_(label)
+{
 }
 
-bool RadioButton::handle_event(const XEvent& event) {
-    if(event.type == ButtonPress && event.xbutton.button == Button1) {
-        int dx = event.xbutton.x - x_;
-        int dy = event.xbutton.y - y_;
-        if(dx >= 0 && dx <= 30 && dy >= 0 && dy <= 16) {
-            selected_ = true;
-            return true;
-        }
-    }
-    return false;
+void RadioButton::draw(Display* dpy, Window window, GC gc) const
+{
+	// Draw outer circle
+	XSetForeground(dpy, gc, 0x000000);
+	XDrawArc(dpy, window, gc, x_, y_, 16, 16, 0, 360 * 64);
+
+	// Draw selection indicator
+	if (selected_)
+	{
+		XSetForeground(dpy, gc, 0x0000FF);
+		XFillArc(dpy, window, gc, x_ + 4, y_ + 4, 8, 8, 0, 360 * 64);
+	}
+
+	// Draw label
+	XFontStruct* font = XLoadQueryFont(dpy, "fixed");
+	if (font)
+	{
+		XSetFont(dpy, gc, font->fid);
+		XDrawString(dpy, window, gc, x_ + 20, y_ + 12, label_.c_str(),
+		            label_.length());
+		XFreeFont(dpy, font);
+	}
 }
 
-void RadioButton::set_selected(bool selected) {
-    selected_ = selected;
+bool RadioButton::handle_event(const XEvent& event)
+{
+	if (event.type == ButtonPress && event.xbutton.button == Button1)
+	{
+		int dx = event.xbutton.x - x_;
+		int dy = event.xbutton.y - y_;
+		if (dx >= 0 && dx <= 30 && dy >= 0 && dy <= 16)
+		{
+			selected_ = true;
+			return true;
+		}
+	}
+	return false;
+}
+
+void RadioButton::set_selected(bool selected)
+{
+	selected_ = selected;
 }
