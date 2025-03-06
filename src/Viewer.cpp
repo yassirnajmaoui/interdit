@@ -95,7 +95,8 @@ void Viewer::handle_events()
 			}
 
 			// Radio buttons
-			if(view.xy_radio->handle_event(event)) {
+			if (view.xy_radio->handle_event(event))
+			{
 				view.xy_radio->set_selected(true);
 				view.xz_radio->set_selected(false);
 				view.yz_radio->set_selected(false);
@@ -103,7 +104,8 @@ void Viewer::handle_events()
 				update_scrollbar_range(view);
 				widget_handled = true;
 			}
-			if(view.xz_radio->handle_event(event)) {
+			if (view.xz_radio->handle_event(event))
+			{
 				view.xy_radio->set_selected(false);
 				view.xz_radio->set_selected(true);
 				view.yz_radio->set_selected(false);
@@ -111,7 +113,8 @@ void Viewer::handle_events()
 				update_scrollbar_range(view);
 				widget_handled = true;
 			}
-			if(view.yz_radio->handle_event(event)) {
+			if (view.yz_radio->handle_event(event))
+			{
 				view.xy_radio->set_selected(false);
 				view.xz_radio->set_selected(false);
 				view.yz_radio->set_selected(true);
@@ -165,7 +168,8 @@ void Viewer::handle_events()
 void Viewer::draw_ui()
 {
 	// Draw to buffer first
-	XSetForeground(display_, gc_, WhitePixel(display_, DefaultScreen(display_)));
+	XSetForeground(display_, gc_,
+	               WhitePixel(display_, DefaultScreen(display_)));
 	XFillRectangle(display_, buffer_, gc_, 0, 0, 800, 600);
 
 	// Draw images horizontally
@@ -283,9 +287,22 @@ void Viewer::draw_volume(const ViewState& view, int x_base, int y_base)
 				break;
 			}
 
-			uint8_t intensity = static_cast<uint8_t>(
-			    255 * (val - view.volume->window_min()) /
-			    (view.volume->window_max() - view.volume->window_min()));
+			float min_value = view.volume->window_min();
+			float max_value = view.volume->window_max();
+			uint8_t intensity;
+			if (val <= min_value)
+			{
+				intensity = 0u;
+			}
+			else if (val >= max_value)
+			{
+				intensity = 255u;
+			}
+			else
+			{
+				intensity = static_cast<uint8_t>(255 * (val - min_value) /
+				                                 (max_value - min_value));
+			}
 
 			XSetForeground(display_, gc_,
 			               intensity << 16 | intensity << 8 | intensity);
