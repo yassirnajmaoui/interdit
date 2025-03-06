@@ -157,7 +157,10 @@ bool Button::handle_event(const XEvent& event)
 		state_ = ButtonState::NORMAL;
 		return inside;
 	case MotionNotify:
-		state_ = inside ? ButtonState::HOVER : ButtonState::NORMAL;
+		if(state_ != ButtonState::PRESSED)
+		{
+			state_ = inside ? ButtonState::HOVER : ButtonState::NORMAL;
+		}
 		return inside;
 	}
 	return false;
