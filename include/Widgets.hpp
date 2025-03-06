@@ -44,3 +44,34 @@ private:
 	bool is_toggle_ = false;
 	bool toggle_state_ = false;
 };
+
+// Add new widget classes
+class Scrollbar {
+public:
+	Scrollbar(int x, int y, int height);
+	void draw(Display* dpy, Window window, GC gc) const;
+	bool handle_event(const XEvent& event);
+	void set_range(int min, int max);
+	int get_value() const { return current_value_; }
+
+	int x_, y_, height_;
+private:
+	int min_value_ = 0;
+	int max_value_ = 100;
+	int current_value_ = 0;
+	bool dragging_ = false;
+};
+
+class RadioButton {
+public:
+	RadioButton(int x, int y, const std::string& label);
+	void draw(Display* dpy, Window window, GC gc) const;
+	bool handle_event(const XEvent& event);
+	void set_selected(bool selected);
+	bool is_selected() const { return selected_; }
+
+	int x_, y_;
+private:
+	std::string label_;
+	bool selected_ = false;
+};

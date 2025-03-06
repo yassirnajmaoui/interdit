@@ -27,7 +27,7 @@ extern "C"
 
 class Viewer {
 public:
-	explicit Viewer(const std::vector<std::shared_ptr<Volume>>& volumes);
+	Viewer(const std::vector<std::shared_ptr<Volume>>& volumes);
 	~Viewer();
 	void run();
 
@@ -38,6 +38,13 @@ private:
 		std::unique_ptr<TextInput> max_input;
 		std::unique_ptr<Button> zoom_btn;
 		std::unique_ptr<Button> drag_btn;
+		std::unique_ptr<Scrollbar> scrollbar;
+		std::unique_ptr<RadioButton> xy_radio;
+		std::unique_ptr<RadioButton> xz_radio;
+		std::unique_ptr<RadioButton> yz_radio;
+
+		enum class Plane { XY, XZ, YZ } plane = Plane::XY;
+		int current_slice = 0;
 		float zoom = 1.0;
 		int pan_x = 0, pan_y = 0;
 		bool zoom_mode = false;
@@ -50,18 +57,20 @@ private:
 	void draw_widgets();
 	void update_colormap();
 	void handle_drag();
+	void draw_volume(const ViewState& view, int x_base, int y_base);
 	void handle_zoom();
-	void draw_volume(const ViewState& view, int y_base);
+	void update_scrollbar_range(ViewState& view);
 
 	Display* display_;
 	Window window_;
 	GC gc_;
-	std::vector<ViewState> views_;
-	bool running_ = true;
-
 	Pixmap buffer_;
+	std::vector<ViewState> views_;
 	int toolbar_height_ = 40;
-	int view_spacing_ = 10;
+	int view_spacing_ = 20;
+	bool running_ = true;
+	int image_spacing_ = 30;  // Space between images
+	int scrollbar_width_ = 15; // Width of scrollbars
 
 	struct InteractionState {
 		bool dragging = false;

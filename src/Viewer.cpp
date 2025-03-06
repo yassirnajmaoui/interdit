@@ -31,6 +31,12 @@ Viewer::Viewer(const std::vector<std::shared_ptr<Volume>>& volumes)
 		vs.max_input = std::make_unique<TextInput>(90, 0, 80, 25);
 		vs.zoom_btn = std::make_unique<Button>(180, 0, 60, 25, "Zoom");
 		vs.drag_btn = std::make_unique<Button>(250, 0, 60, 25, "Drag");
+		vs.scrollbar = std::make_unique<Scrollbar>(5, toolbar_height_, 500);
+		vs.xy_radio = std::make_unique<RadioButton>(400, 5, "XY");
+		vs.xz_radio = std::make_unique<RadioButton>(450, 5, "XZ");
+		vs.yz_radio = std::make_unique<RadioButton>(500, 5, "YZ");
+		vs.xy_radio->set_selected(true);
+		update_scrollbar_range(vs);
 		views_.push_back(std::move(vs));
 	}
 
@@ -66,19 +72,43 @@ void Viewer::handle_events()
 	{
 		XNextEvent(display_, &event);
 
-		// Handle widgets
 		bool widget_handled = false;
 		for (auto& view : views_)
 		{
-			if (view.min_input->handle_event(event) ||
-			    view.max_input->handle_event(event) ||
-			    view.zoom_btn->handle_event(event) ||
-			    view.drag_btn->handle_event(event))
-			{
+			// Handle all widgets
+			if (view.min_input->handle_event(event))
 				widget_handled = true;
-				break;
+			if (view.max_input->handle_event(event))
+				widget_handled = true;
+			if (view.zoom_btn->handle_event(event))
+				widget_handled = true;
+			if (view.drag_btn->handle_event(event))
+				widget_handled = true;
+			if (view.scrollbar->handle_event(event))
+			{
+				view.current_slice = view.scrollbar->get_value();
+				widget_handled = true;
+			}
+			if (view.xy_radio->handle_event(event))
+			{
+				view.plane = ViewState::Plane::XY;
+				update_scrollbar_range(view);
+				widget_handled = true;
+			}
+			if (view.xz_radio->handle_event(event))
+			{
+				view.plane = ViewState::Plane::XZ;
+				update_scrollbar_range(view);
+				widget_handled = true;
+			}
+			if (view.yz_radio->handle_event(event))
+			{
+				view.plane = ViewState::Plane::YZ;
+				update_scrollbar_range(view);
+				widget_handled = true;
 			}
 		}
+
 		if (widget_handled)
 			continue;
 
@@ -110,26 +140,63 @@ void Viewer::handle_events()
 				handle_zoom();
 			}
 			break;
+
+		case ClientMessage:
+			if (event.xclient.data.l[0] ==
+			    XInternAtom(display_, "WM_DELETE_WINDOW", False))
+				running_ = false;
+			break;
 		}
 	}
 }
 
 void Viewer::draw_ui()
 {
+	XClearWindow(display_, window_);
+
 	// Draw to buffer first
 	XSetForeground(display_, gc_,
 	               WhitePixel(display_, DefaultScreen(display_)));
 	XFillRectangle(display_, buffer_, gc_, 0, 0, 800, 600);
 
-	// Draw images below toolbar
-	int y_pos = toolbar_height_;
+	// Draw images horizontally
+	int x_pos = scrollbar_width_ + image_spacing_;  // Initial X position
+	int y_base = toolbar_height_ + image_spacing_;  // Start below toolbar
+
 	for (auto& view : views_)
 	{
-		draw_volume(view, y_pos);
-		y_pos += view.volume->ny() * view.zoom + view_spacing_;
+		// Calculate image dimensions based on plane
+		int img_width, img_height;
+		switch (view.plane)
+		{
+		case ViewState::Plane::XY:
+			img_width = view.volume->nx() * view.zoom;
+			img_height = view.volume->ny() * view.zoom;
+			break;
+		case ViewState::Plane::XZ:
+			img_width = view.volume->nx() * view.zoom;
+			img_height = view.volume->nz() * view.zoom;
+			break;
+		case ViewState::Plane::YZ:
+			img_width = view.volume->ny() * view.zoom;
+			img_height = view.volume->nz() * view.zoom;
+			break;
+		}
+
+		// Position and draw scrollbar
+		view.scrollbar->x_ = x_pos - scrollbar_width_ - image_spacing_;
+		view.scrollbar->y_ = y_base;
+		view.scrollbar->height_ = img_height;
+		view.scrollbar->draw(display_, buffer_, gc_);
+
+		// Draw the image
+		draw_volume(view, x_pos, y_base);
+
+		// Update X position for next image
+		x_pos += img_width + image_spacing_ + scrollbar_width_;
 	}
 
-	// Draw widgets on top
+	// Draw toolbar widgets on top
 	draw_widgets();
 
 	// Copy buffer to window
@@ -149,45 +216,79 @@ void Viewer::draw_widgets()
 		view.zoom_btn->x_ = x_pos + 200;
 		view.zoom_btn->y_ = 5;
 		view.drag_btn->x_ = x_pos + 280;
-		view.drag_btn->y_ = 5;
+		view.zoom_btn->y_ = 5;
+		view.xy_radio->x_ = x_pos + 360;
+		view.xy_radio->y_ = 5;
+		view.xz_radio->x_ = x_pos + 410;
+		view.xz_radio->y_ = 5;
+		view.yz_radio->x_ = x_pos + 460;
+		view.yz_radio->y_ = 5;
 
 		// Draw widgets
 		view.min_input->draw(display_, buffer_, gc_);
 		view.max_input->draw(display_, buffer_, gc_);
 		view.zoom_btn->draw(display_, buffer_, gc_);
 		view.drag_btn->draw(display_, buffer_, gc_);
+		view.xy_radio->draw(display_, buffer_, gc_);
+		view.xz_radio->draw(display_, buffer_, gc_);
+		view.yz_radio->draw(display_, buffer_, gc_);
 
-		x_pos += 350;
+		x_pos += 500;  // Space for next image's controls
 	}
 }
 
-void Viewer::draw_volume(const ViewState& view, int y_base)
+void Viewer::draw_volume(const ViewState& view, int x_base, int y_base)
 {
-	const float zoom = view.zoom;
-	const int pan_x = view.pan_x;
-	const int pan_y = view.pan_y;
-
-	for (int y = 0; y < view.volume->ny(); y++)
+	int w, h;
+	switch (view.plane)
 	{
-		for (int x = 0; x < view.volume->nx(); x++)
+	case ViewState::Plane::XY:
+		w = view.volume->nx();
+		h = view.volume->ny();
+		break;
+	case ViewState::Plane::XZ:
+		w = view.volume->nx();
+		h = view.volume->nz();
+		break;
+	case ViewState::Plane::YZ:
+		w = view.volume->ny();
+		h = view.volume->nz();
+		break;
+	}
+
+	for (int y = 0; y < h; y++)
+	{
+		for (int x = 0; x < w; x++)
 		{
-			const float val = view.volume->at(x, y, 0);
-			const uint8_t intensity = static_cast<uint8_t>(
+			float val;
+			switch (view.plane)
+			{
+			case ViewState::Plane::XY:
+				val = view.volume->at(x, y, view.current_slice);
+				break;
+			case ViewState::Plane::XZ:
+				val = view.volume->at(x, view.current_slice, y);
+				break;
+			case ViewState::Plane::YZ:
+				val = view.volume->at(view.current_slice, x, y);
+				break;
+			}
+
+			uint8_t intensity = static_cast<uint8_t>(
 			    255 * (val - view.volume->window_min()) /
 			    (view.volume->window_max() - view.volume->window_min()));
 
 			XSetForeground(display_, gc_,
 			               intensity << 16 | intensity << 8 | intensity);
 
-			// Apply zoom and pan
-			const int screen_x = pan_x + x * zoom;
-			const int screen_y = y_base + pan_y + y * zoom;
+			const int screen_x = x_base + view.pan_x + x * view.zoom;
+			const int screen_y = y_base + view.pan_y + y * view.zoom;
 
 			if (screen_x >= 0 && screen_x < 800 &&
 			    screen_y >= toolbar_height_ && screen_y < 600)
 			{
-				XFillRectangle(display_, buffer_, gc_, screen_x, screen_y, zoom,
-				               zoom);
+				XFillRectangle(display_, buffer_, gc_, screen_x, screen_y,
+				               view.zoom, view.zoom);
 			}
 		}
 	}
@@ -242,5 +343,22 @@ void Viewer::handle_zoom()
 				view.pan_y = interaction_.start_y - toolbar_height_;
 			}
 		}
+	}
+}
+
+// New helper functions
+void Viewer::update_scrollbar_range(ViewState& view)
+{
+	switch (view.plane)
+	{
+	case ViewState::Plane::XY:
+		view.scrollbar->set_range(0, view.volume->nz() - 1);
+		break;
+	case ViewState::Plane::XZ:
+		view.scrollbar->set_range(0, view.volume->ny() - 1);
+		break;
+	case ViewState::Plane::YZ:
+		view.scrollbar->set_range(0, view.volume->nx() - 1);
+		break;
 	}
 }
