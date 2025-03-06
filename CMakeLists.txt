@@ -1,29 +1,30 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
 project(interdit LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Verify X11 installation
+# Verify FLTK installation
+find_package(FLTK CONFIG REQUIRED NO_MODULE)
 find_package(X11 REQUIRED)
-if(NOT X11_FOUND)
-    message(FATAL_ERROR "X11 development libraries not found! Install them with:\n  sudo apt-get install libx11-dev")
-endif()
 
 add_executable(interdit
     src/main.cpp
-    src/Volume.cpp
-    src/Viewer.cpp
-    src/Widgets.cpp
 )
 
 target_include_directories(interdit PRIVATE 
     include
+    ${FLTK_INCLUDE_DIR}
     ${X11_INCLUDE_DIR}
 )
 
-target_link_libraries(interdit PRIVATE 
+target_link_libraries(interdit PRIVATE
+    fltk
+    ${FLTK_IMAGES_LIBRARY}
     ${X11_LIBRARIES}
-    m
+    ${XFIXES_LIBRARY}
+    ${XRENDER_LIBRARY}
+    ${XCURSOR_LIBRARY}
+    ${XINERAMA_LIBRARY}
     pthread
 )
