@@ -33,6 +33,7 @@ public:
 	void set_callback(std::function<void()> callback);
 	void set_toggle(bool is_toggle);
 	bool is_pressed() const { return state_ == ButtonState::PRESSED; }
+	void set_pressed(bool is_pressed);
 
 	int x_, y_, width_, height_;
 private:

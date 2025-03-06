@@ -47,6 +47,7 @@ private:
 		int current_slice = 0;
 		float zoom = 1.0;
 		int pan_x = 0, pan_y = 0;
+		int pan_start_x = 0, pan_start_y = 0;
 		bool zoom_mode = false;
 		bool drag_mode = false;
 	};
@@ -60,6 +61,9 @@ private:
 	void draw_volume(const ViewState& view, int x_base, int y_base);
 	void handle_zoom();
 	void update_scrollbar_range(ViewState& view);
+	bool is_point_in_view(int x, int y, const ViewState& view);
+	int get_view_width(const ViewState& view) const;
+	int get_view_height(const ViewState& view) const;
 
 	Display* display_;
 	Window window_;
@@ -73,10 +77,11 @@ private:
 	int scrollbar_width_ = 15; // Width of scrollbars
 
 	struct InteractionState {
-		bool dragging = false;
+		enum class Mode { NONE, ZOOM_RECT, DRAGGING } mode = Mode::NONE;
 		int start_x = 0;
 		int start_y = 0;
 		int current_x = 0;
 		int current_y = 0;
+		int active_view = 0;
 	} interaction_;
 };

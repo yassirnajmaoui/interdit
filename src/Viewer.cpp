@@ -37,6 +37,25 @@ Viewer::Viewer(const std::vector<std::shared_ptr<Volume>>& volumes)
 		vs.yz_radio = std::make_unique<RadioButton>(500, 5, "YZ");
 		vs.xy_radio->set_selected(true);
 		update_scrollbar_range(vs);
+
+		vs.zoom_btn->set_callback(
+		    [this, &vs]
+		    {
+			    vs.zoom_mode = !vs.zoom_mode;
+			    vs.drag_mode = false;
+			    if (vs.zoom_mode)
+				    vs.drag_btn->set_pressed(false);
+		    });
+
+		vs.drag_btn->set_callback(
+		    [this, &vs]
+		    {
+			    vs.drag_mode = !vs.drag_mode;
+			    vs.zoom_mode = false;
+			    if (vs.drag_mode)
+				    vs.zoom_btn->set_pressed(false);
+		    });
+
 		views_.push_back(std::move(vs));
 	}
 
@@ -124,7 +143,7 @@ void Viewer::handle_events()
 			}
 		}
 
-		if (!widget_handled)
+		if (widget_handled)
 			continue;
 
 		// Handle canvas interactions
@@ -133,33 +152,53 @@ void Viewer::handle_events()
 		case ButtonPress:
 			if (event.xbutton.button == Button1)
 			{
-				interaction_.dragging = true;
 				interaction_.start_x = event.xbutton.x;
 				interaction_.start_y = event.xbutton.y;
+				interaction_.current_x = event.xbutton.x;
+				interaction_.current_y = event.xbutton.y;
+
+				// Find which view was clicked
+				for (size_t i = 0; i < views_.size(); i++)
+				{
+					if (is_point_in_view(event.xbutton.x, event.xbutton.y,
+					                     views_[i]))
+					{
+						interaction_.active_view = i;
+						break;
+					}
+				}
+
+				auto& active_view = views_[interaction_.active_view];
+				if (active_view.zoom_mode)
+				{
+					interaction_.mode = InteractionState::Mode::ZOOM_RECT;
+				}
+				else if (active_view.drag_mode)
+				{
+					interaction_.mode = InteractionState::Mode::DRAGGING;
+					active_view.pan_start_x = active_view.pan_x;
+					active_view.pan_start_y = active_view.pan_y;
+				}
 			}
 			break;
 
 		case MotionNotify:
-			if (interaction_.dragging)
+			if (interaction_.mode != InteractionState::Mode::NONE)
 			{
 				interaction_.current_x = event.xmotion.x;
 				interaction_.current_y = event.xmotion.y;
-				handle_drag();
 			}
 			break;
 
 		case ButtonRelease:
 			if (event.xbutton.button == Button1)
 			{
-				interaction_.dragging = false;
-				handle_zoom();
+				if (interaction_.mode == InteractionState::Mode::ZOOM_RECT)
+				{
+					handle_zoom();
+				}
+				interaction_.mode = InteractionState::Mode::NONE;
 			}
-			break;
-
-		case ClientMessage:
-			if (event.xclient.data.l[0] ==
-			    XInternAtom(display_, "WM_DELETE_WINDOW", False))
-				running_ = false;
 			break;
 		}
 	}
@@ -214,6 +253,21 @@ void Viewer::draw_ui()
 
 	// Copy buffer to window
 	XCopyArea(display_, buffer_, window_, gc_, 0, 0, 800, 600, 0, 0);
+
+	// Draw zoom rectangle if active
+	if (interaction_.mode == InteractionState::Mode::ZOOM_RECT)
+	{
+		XSetForeground(display_, gc_, 0xFF0000);  // Red color
+		XSetLineAttributes(display_, gc_, 2, LineSolid, CapButt, JoinMiter);
+
+		int x1 = std::min(interaction_.start_x, interaction_.current_x);
+		int y1 = std::min(interaction_.start_y, interaction_.current_y);
+		int x2 = std::max(interaction_.start_x, interaction_.current_x);
+		int y2 = std::max(interaction_.start_y, interaction_.current_y);
+
+		XDrawRectangle(display_, buffer_, gc_, x1, y1, x2 - x1, y2 - y1);
+		XSetLineAttributes(display_, gc_, 1, LineSolid, CapButt, JoinMiter);
+	}
 }
 
 void Viewer::draw_widgets()
@@ -337,38 +391,46 @@ void Viewer::update_colormap()
 	}
 }
 
+// Handle dragging
 void Viewer::handle_drag()
 {
-	for (auto& view : views_)
+	auto& view = views_[interaction_.active_view];
+	if (interaction_.mode == InteractionState::Mode::DRAGGING)
 	{
-		if (view.drag_btn->is_pressed())
-		{
-			view.pan_x += interaction_.current_x - interaction_.start_x;
-			view.pan_y += interaction_.current_y - interaction_.start_y;
-			interaction_.start_x = interaction_.current_x;
-			interaction_.start_y = interaction_.current_y;
-		}
+		view.pan_x =
+		    view.pan_start_x + (interaction_.current_x - interaction_.start_x);
+		view.pan_y =
+		    view.pan_start_y + (interaction_.current_y - interaction_.start_y);
 	}
 }
 
+// Handle zoom rectangle
 void Viewer::handle_zoom()
 {
-	for (auto& view : views_)
-	{
-		if (view.zoom_btn->is_pressed())
-		{
-			const int dx = interaction_.current_x - interaction_.start_x;
-			const int dy = interaction_.current_y - interaction_.start_y;
+	auto& view = views_[interaction_.active_view];
 
-			if (dx > 10 && dy > 10)
-			{  // Minimum zoom area
-				const float zoom_x = view.volume->nx() / static_cast<float>(dx);
-				const float zoom_y = view.volume->ny() / static_cast<float>(dy);
-				view.zoom = std::min(zoom_x, zoom_y);
-				view.pan_x = interaction_.start_x;
-				view.pan_y = interaction_.start_y - toolbar_height_;
-			}
-		}
+	// Convert screen coordinates to image coordinates
+	int img_x1 = interaction_.start_x - view.pan_x;
+	int img_y1 = interaction_.start_y - view.pan_y - toolbar_height_;
+	int img_x2 = interaction_.current_x - view.pan_x;
+	int img_y2 = interaction_.current_y - view.pan_y - toolbar_height_;
+
+	// Calculate zoom area
+	int rect_width = abs(img_x2 - img_x1);
+	int rect_height = abs(img_y2 - img_y1);
+
+	if (rect_width > 10 && rect_height > 10)
+	{  // Minimum size
+		// Calculate new zoom
+		float zoom_x = view.volume->nx() / static_cast<float>(rect_width);
+		float zoom_y = view.volume->ny() / static_cast<float>(rect_height);
+		view.zoom = std::min(zoom_x, zoom_y);
+
+		// Center on selection
+		view.pan_x =
+		    -(img_x1 + img_x2) / 2 * view.zoom + get_view_width(view) / 2;
+		view.pan_y =
+		    -(img_y1 + img_y2) / 2 * view.zoom + get_view_height(view) / 2;
 	}
 }
 
@@ -386,5 +448,38 @@ void Viewer::update_scrollbar_range(ViewState& view)
 	case ViewState::Plane::YZ:
 		view.scrollbar->set_range(0, view.volume->nx() - 1);
 		break;
+	}
+}
+
+// New helper function
+bool Viewer::is_point_in_view(int x, int y, const ViewState& view)
+{
+	// Calculate view position based on layout
+	int view_x = view.scrollbar->x_ + scrollbar_width_ + image_spacing_;
+	int view_y = toolbar_height_ + image_spacing_;
+	int view_width = get_view_width(view);
+	int view_height = get_view_height(view);
+
+	return x >= view_x && x <= view_x + view_width && y >= view_y &&
+	       y <= view_y + view_height;
+}
+
+int Viewer::get_view_width(const ViewState& view) const
+{
+	switch (view.plane)
+	{
+	case ViewState::Plane::XY: return view.volume->nx() * view.zoom;
+	case ViewState::Plane::XZ: return view.volume->nx() * view.zoom;
+	case ViewState::Plane::YZ: return view.volume->ny() * view.zoom;
+	}
+}
+
+int Viewer::get_view_height(const ViewState& view) const
+{
+	switch (view.plane)
+	{
+	case ViewState::Plane::XY: return view.volume->ny() * view.zoom;
+	case ViewState::Plane::XZ: return view.volume->nz() * view.zoom;
+	case ViewState::Plane::YZ: return view.volume->nz() * view.zoom;
 	}
 }

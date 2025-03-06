@@ -173,6 +173,18 @@ void Button::set_toggle(bool is_toggle)
 	is_toggle_ = is_toggle;
 }
 
+void Button::set_pressed(bool is_pressed)
+{
+	if (is_pressed)
+	{
+		state_ = ButtonState::PRESSED;
+	}
+	else
+	{
+		state_ = ButtonState::NORMAL;
+	}
+}
+
 // Scrollbar implementation
 Scrollbar::Scrollbar(int x, int y, int height) : x_(x), y_(y), height_(height)
 {
