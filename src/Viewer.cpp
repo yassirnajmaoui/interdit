@@ -1,6 +1,7 @@
 #include "Viewer.hpp"
 #include <X11/Xutil.h>
 #include <cmath>
+#include <iostream>
 #include <stdexcept>
 #include <unistd.h>
 
@@ -31,32 +32,35 @@ Viewer::Viewer(const std::vector<std::shared_ptr<Volume>>& volumes)
 		vs.max_input = std::make_unique<TextInput>(90, 0, 80, 25);
 		vs.zoom_btn = std::make_unique<Button>(180, 0, 60, 25, "Zoom");
 		vs.drag_btn = std::make_unique<Button>(250, 0, 60, 25, "Drag");
-		vs.scrollbar = std::make_unique<Scrollbar>(5, toolbar_height_, 500);
+		vs.scrollbar = std::make_unique<Scrollbar>(5, toolbar_height_, 500, 20);
 		vs.xy_radio = std::make_unique<RadioButton>(400, 5, "XY");
 		vs.xz_radio = std::make_unique<RadioButton>(450, 5, "XZ");
 		vs.yz_radio = std::make_unique<RadioButton>(500, 5, "YZ");
 		vs.xy_radio->set_selected(true);
 		update_scrollbar_range(vs);
 
-		vs.zoom_btn->set_callback(
-		    [this, &vs]
-		    {
-			    vs.zoom_mode = !vs.zoom_mode;
-			    vs.drag_mode = false;
-			    if (vs.zoom_mode)
-				    vs.drag_btn->set_pressed(false);
-		    });
-
-		vs.drag_btn->set_callback(
-		    [this, &vs]
-		    {
-			    vs.drag_mode = !vs.drag_mode;
-			    vs.zoom_mode = false;
-			    if (vs.drag_mode)
-				    vs.zoom_btn->set_pressed(false);
-		    });
-
 		views_.push_back(std::move(vs));
+
+		size_t curr_view_id = views_.size() - 1;
+
+		views_[curr_view_id].zoom_btn->set_callback(
+		    [this, curr_view_id]
+		    {
+			    views_[curr_view_id].zoom_mode = !views_[curr_view_id].zoom_mode;
+			    views_[curr_view_id].drag_mode = false;
+			    if (views_[curr_view_id].zoom_mode)
+				    views_[curr_view_id].drag_btn->set_pressed(false);
+		    });
+
+		views_[curr_view_id].drag_btn->set_callback(
+		    [this, curr_view_id]
+		    {
+			    views_[curr_view_id].drag_mode = !views_[curr_view_id].drag_mode;
+			    views_[curr_view_id].zoom_mode = false;
+			    if (views_[curr_view_id].drag_mode)
+				    views_[curr_view_id].zoom_btn->set_pressed(false);
+		    });
+
 	}
 
 	XMapWindow(display_, window_);
@@ -212,7 +216,7 @@ void Viewer::draw_ui()
 	XFillRectangle(display_, buffer_, gc_, 0, 0, 800, 600);
 
 	// Draw images horizontally
-	int x_pos = scrollbar_width_ + image_spacing_;  // Initial X position
+	int x_pos = scrollbar_width_;  // Initial X position
 	int y_base = toolbar_height_ + image_spacing_;  // Start below toolbar
 
 	for (auto& view : views_)
@@ -280,16 +284,16 @@ void Viewer::draw_widgets()
 		view.min_input->y_ = 5;
 		view.max_input->x_ = x_pos + 100;
 		view.max_input->y_ = 5;
-		view.zoom_btn->x_ = x_pos + 200;
-		view.zoom_btn->y_ = 5;
-		view.drag_btn->x_ = x_pos + 280;
-		view.zoom_btn->y_ = 5;
-		view.xy_radio->x_ = x_pos + 360;
-		view.xy_radio->y_ = 5;
-		view.xz_radio->x_ = x_pos + 410;
-		view.xz_radio->y_ = 5;
-		view.yz_radio->x_ = x_pos + 460;
-		view.yz_radio->y_ = 5;
+		view.zoom_btn->x_ = x_pos;
+		view.zoom_btn->y_ = view.max_input->height_ + 10;
+		view.drag_btn->x_ = x_pos + view.zoom_btn->width_ + 10;
+		view.drag_btn->y_ = view.zoom_btn->y_;
+		view.xy_radio->x_ = x_pos + 200;
+		view.xy_radio->y_ = 8;
+		view.xz_radio->x_ = view.drag_btn->x_ + view.drag_btn->width_ + 10;
+		view.xz_radio->y_ = view.zoom_btn->y_ + 3;
+		view.yz_radio->x_ = view.xz_radio->x_ + 50;
+		view.yz_radio->y_ = view.zoom_btn->y_ + 3;
 
 		// Draw widgets
 		view.min_input->draw(display_, buffer_, gc_);
@@ -323,6 +327,15 @@ void Viewer::draw_volume(const ViewState& view, int x_base, int y_base)
 		break;
 	}
 
+	const float min_value = view.volume->window_min();
+	const float max_value = view.volume->window_max();
+
+	if(min_value >= max_value)
+	{
+		std::cerr << "Invalid minimum and maximum values" << std::endl;
+		return;
+	}
+
 	for (int y = 0; y < h; y++)
 	{
 		for (int x = 0; x < w; x++)
@@ -340,9 +353,6 @@ void Viewer::draw_volume(const ViewState& view, int x_base, int y_base)
 				val = view.volume->at(view.current_slice, x, y);
 				break;
 			}
-
-			float min_value = view.volume->window_min();
-			float max_value = view.volume->window_max();
 			uint8_t intensity;
 			if (val <= min_value)
 			{

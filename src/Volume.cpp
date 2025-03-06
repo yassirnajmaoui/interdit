@@ -38,8 +38,8 @@ float Volume::at(int x, int y, int z) const
 
 void Volume::set_window(float min, float max)
 {
-	window_min_ = std::max(min, global_min_);
-	window_max_ = std::min(max, global_max_);
+	window_min_ = min;
+	window_max_ = max;
 	if (window_min_ >= window_max_)
 		window_max_ = window_min_ + 1e-6f;
 }

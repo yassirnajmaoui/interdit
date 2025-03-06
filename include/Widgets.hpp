@@ -49,17 +49,18 @@ private:
 // Add new widget classes
 class Scrollbar {
 public:
-	Scrollbar(int x, int y, int height);
+	Scrollbar(int x, int y, int height, int width);
 	void draw(Display* dpy, Window window, GC gc) const;
 	bool handle_event(const XEvent& event);
 	void set_range(int min, int max);
 	int get_value() const { return current_value_; }
 
-	int x_, y_, height_;
+	int x_, y_, height_, width_;
 private:
 	int min_value_ = 0;
 	int max_value_ = 100;
 	int current_value_ = 0;
+	int tolerance_ = 10;
 	bool dragging_ = false;
 };
 

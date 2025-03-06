@@ -186,7 +186,8 @@ void Button::set_pressed(bool is_pressed)
 }
 
 // Scrollbar implementation
-Scrollbar::Scrollbar(int x, int y, int height) : x_(x), y_(y), height_(height)
+Scrollbar::Scrollbar(int x, int y, int height, int width)
+    : x_(x), y_(y), height_(height), width_(width)
 {
 }
 
@@ -208,35 +209,39 @@ void Scrollbar::draw(Display* dpy, Window window, GC gc) const
 
 bool Scrollbar::handle_event(const XEvent& event)
 {
-	const int scrollbar_width = 15;
 
 	// Check if within horizontal bounds
-	bool in_x =
-	    (event.xbutton.x >= x_) && (event.xbutton.x <= x_ + scrollbar_width);
+	const bool in_x = (event.xbutton.x >= x_ - tolerance_) &&
+	                  (event.xbutton.x <= x_ + width_ + tolerance_);
+	const bool in_y = (event.xbutton.y >= y_ - tolerance_) &&
+	                  (event.xbutton.y <= y_ + height_ + tolerance_);
 
-	if (event.type == ButtonPress && event.xbutton.button == Button1 && in_x)
+	if (in_x && in_y)
 	{
-		int click_y = event.xbutton.y - y_;
-		float ratio = static_cast<float>(click_y) / height_;
-		current_value_ = min_value_ + ratio * (max_value_ - min_value_);
-		current_value_ = std::clamp(current_value_, min_value_, max_value_);
-		dragging_ = true;
-		return true;
-	}
+		if (event.type == ButtonPress && event.xbutton.button == Button1)
+		{
+			int click_y = event.xbutton.y - y_;
+			float ratio = static_cast<float>(click_y) / height_;
+			current_value_ = min_value_ + ratio * (max_value_ - min_value_);
+			current_value_ = std::clamp(current_value_, min_value_, max_value_);
+			dragging_ = true;
+			return true;
+		}
 
-	if (event.type == MotionNotify && dragging_ && in_x)
-	{
-		int new_y = event.xmotion.y - y_;
-		float ratio =
-		    std::max(0.0f, std::min(1.0f, static_cast<float>(new_y) / height_));
-		current_value_ = min_value_ + ratio * (max_value_ - min_value_);
-		return true;
-	}
+		if (event.type == MotionNotify && dragging_)
+		{
+			int new_y = event.xmotion.y - y_;
+			float ratio = std::max(
+			    0.0f, std::min(1.0f, static_cast<float>(new_y) / height_));
+			current_value_ = min_value_ + ratio * (max_value_ - min_value_);
+			return true;
+		}
 
-	if (event.type == ButtonRelease && event.xbutton.button == Button1)
-	{
-		dragging_ = false;
-		return in_x;  // Only return true if released in scrollbar area
+		if (event.type == ButtonRelease && event.xbutton.button == Button1)
+		{
+			dragging_ = false;
+			return true;  // Only return true if released in scrollbar area
+		}
 	}
 
 	return false;
