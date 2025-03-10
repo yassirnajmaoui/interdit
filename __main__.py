@@ -4,11 +4,20 @@ import sys
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QScrollBar, QLineEdit, QLabel, QRadioButton,
-                             QSizePolicy)
+                             QCheckBox, QSizePolicy, QDialog)
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QMouseEvent
-from PyQt5.QtCore import Qt, QRect, QPoint, QPointF, QSize, QRectF
+from PyQt5.QtCore import Qt, QPoint, QRectF, pyqtSignal, QPointF
+
+# TODO: Sync view should also mean to sync the orientation
+# TODO: The display should always take the size of the frame
+#  if the window is resized, the display should refresh without
+#  needing to click reset and losing the view
 
 class VolumeViewer(QMainWindow):
+    intensity_changed = pyqtSignal(tuple)
+    view_rect_changed = pyqtSignal(tuple)
+    slice_changed = pyqtSignal(int)
+
     def __init__(self, volume_data, nx, ny, nz):
         super().__init__()
         self.volume = volume_data
@@ -21,7 +30,19 @@ class VolumeViewer(QMainWindow):
         self.drag_start_pos = None
         self.last_pixmap_info = None  # (pixmap_rect, image_rect)
         self.initUI()
-
+        
+        self.min_input.editingFinished.connect(self._emit_intensity_changed)
+        self.max_input.editingFinished.connect(self._emit_intensity_changed)
+        self.scrollbar.valueChanged.connect(lambda v: self.slice_changed.emit(v))
+    
+    def _emit_intensity_changed(self):
+        try:
+            min_val = float(self.min_input.text())
+            max_val = float(self.max_input.text())
+            self.intensity_changed.emit((min_val, max_val))
+        except ValueError:
+            pass
+    
     def initUI(self):
         # Central widget and main layout
         central_widget = QWidget()
@@ -85,9 +106,6 @@ class VolumeViewer(QMainWindow):
         self.reset_view()
 
     def reset_view(self):
-        self.window_level = [np.min(self.volume), np.max(self.volume)]
-        self.min_input.setText(f"{self.window_level[0]:.2f}")
-        self.max_input.setText(f"{self.window_level[1]:.2f}")
         slice_data = self.get_current_slice()
         h, w = slice_data.shape
         self.view_rect = (0, w, 0, h)
@@ -139,7 +157,9 @@ class VolumeViewer(QMainWindow):
             QRectF(x_min, y_min, view_w, view_h)
         )
 
-    def set_slice(self, value):
+    def set_slice(self, value, internal=False):
+        if not internal:
+            self.slice_changed.emit(value)
         self.current_slice = value
         self.update_display()
 
@@ -155,17 +175,28 @@ class VolumeViewer(QMainWindow):
         self.scrollbar.setValue(self.current_slice)
         self.view_rect = None
         self.update_display()
+    
+    def set_view_rect(self, view_rect, internal=False):
+        if not internal:
+            self.view_rect_changed.emit(view_rect)
+        self.view_rect = view_rect
+        self.update_display()
 
     def update_window_level(self):
         try:
-            self.window_level = [
-                float(self.min_input.text()),
-                float(self.max_input.text())
-            ]
-            self.update_display()
+            self.set_window_level(float(self.min_input.text()), float(self.max_input.text()))
         except ValueError:
             pass
-
+    
+    def set_window_level(self, min_val, max_val, internal=False):
+        if not internal:
+            self.intensity_changed.emit((min_val, max_val))
+        self.window_level = [
+                min_val,
+                max_val
+            ]
+        self.update_display()
+        
     def mousePressEvent(self, event: QMouseEvent):
         if self.image_label.underMouse():
             # Store initial view rectangle and precise start position
@@ -218,8 +249,8 @@ class VolumeViewer(QMainWindow):
                     new_y_max = y_max
 
                 if image_needs_update:
-                    self.view_rect = (new_x_min, new_x_max, new_y_min, new_y_max)
-                    self.update_display()
+                    view_rect = (new_x_min, new_x_max, new_y_min, new_y_max)
+                    self.set_view_rect(view_rect)
             
         elif self.zoom_btn.isChecked():
             # Get current position in image coordinates
@@ -257,8 +288,8 @@ class VolumeViewer(QMainWindow):
             y_max = clamp(y_max, 0, current_height)
 
             if x_max - x_min > 2 and y_max - y_min > 2:
-                self.view_rect = (x_min, x_max, y_min, y_max)
-                self.update_display()
+                view_rect = (x_min, x_max, y_min, y_max)                
+                self.set_view_rect(view_rect)
 
         self.dragging = False
 
@@ -304,50 +335,68 @@ class VolumeViewer(QMainWindow):
         slice_data = self.get_current_slice()
         return float(slice_data.shape[0])
 
+
+class SyncControl(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout()
+        self.intensity_sync = QCheckBox("Sync Intensity")
+        self.view_sync = QCheckBox("Sync View")
+        self.slice_sync = QCheckBox("Sync Slice")
+        layout.addWidget(self.intensity_sync)
+        layout.addWidget(self.view_sync)
+        layout.addWidget(self.slice_sync)
+        self.setLayout(layout)
+        self.setWindowTitle("Synchronization Controls")
+
+class VolumeViewerManager:
+    def __init__(self, volumes):
+        self.viewers = []
+        self.app = QApplication.instance() or QApplication(sys.argv)
+        
+        # Create sync control window
+        self.sync_control = SyncControl()
+        self.sync_control.show()
+        
+        # Create viewers
+        for vol_data, nx, ny, nz in volumes:
+            viewer = VolumeViewer(vol_data, nx, ny, nz)
+            viewer.show()
+            self._connect_viewer_signals(viewer)
+            self.viewers.append(viewer)
+
+    def _connect_viewer_signals(self, viewer):
+        viewer.intensity_changed.connect(
+            lambda wl: self._propagate_intensity(viewer, wl))
+        viewer.view_rect_changed.connect(
+            lambda vr: self._propagate_view_rect(viewer, vr))
+        viewer.slice_changed.connect(
+            lambda s: self._propagate_slice(viewer, s))
+
+    def _propagate_intensity(self, source, window_level):
+        if self.sync_control.intensity_sync.isChecked():
+            for viewer in self.viewers:
+                if viewer != source:
+                    viewer.set_window_level(*window_level, internal=True)
+
+    def _propagate_view_rect(self, source, view_rect):
+        if self.sync_control.view_sync.isChecked():
+            for viewer in self.viewers:
+                if viewer != source:
+                    viewer.set_view_rect(view_rect, internal=True)
+
+    def _propagate_slice(self, source, slice_idx):
+        if self.sync_control.slice_sync.isChecked():
+            for viewer in self.viewers:
+                if viewer != source:
+                    viewer.set_slice(slice_idx, internal=True)
+
 def clamp(val, min, max):
     if val < min:
         return min
     if val > max:
         return max
     return val
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="3D Volume Viewer",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument(
-        "input_file",
-        type=str,
-        help="Path to raw volume file (float32 binary)"
-    )
-    parser.add_argument(
-        "nx", type=int,
-        help="Size in X dimension (width)"
-    )
-    parser.add_argument(
-        "ny", type=int,
-        help="Size in Y dimension (height)"
-    )
-    parser.add_argument(
-        "nz", type=int,
-        help="Size in Z dimension (depth)"
-    )
-    
-    args = parser.parse_args()
-    
-    # Validate arguments
-    if args.nx <= 0 or args.ny <= 0 or args.nz <= 0:
-        raise ValueError("All dimensions must be positive integers")
-    
-    try:
-        volume = load_volume(args.input_file, args.nx, args.ny, args.nz)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Input file not found: {args.input_file}")
-    
-    app = QApplication(sys.argv)
-    viewer = VolumeViewer(volume, args.nx, args.ny, args.nz)
-    sys.exit(app.exec_())
 
 def load_volume(filename, nx, ny, nz):
     """Load volume from raw binary file"""
@@ -362,6 +411,27 @@ def load_volume(filename, nx, ny, nz):
         return data.reshape((nz, ny, nx))  # Note ZYX ordering for numpy
     except Exception as e:
         raise RuntimeError(f"Error loading volume: {str(e)}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Multi-Volume Viewer")
+    parser.add_argument('volumes', nargs='+', 
+                      help="Volume files and dimensions as: file nx ny nz")
+    args = parser.parse_args()
+
+    if len(args.volumes) % 4 != 0:
+        raise ValueError("Expected groups of 4 arguments: file nx ny nz")
+
+    volumes = []
+    for i in range(0, len(args.volumes), 4):
+        try:
+            path, nx, ny, nz = args.volumes[i:i+4]
+            vol = load_volume(path, int(nx), int(ny), int(nz))
+            volumes.append((vol, int(nx), int(ny), int(nz)))
+        except Exception as e:
+            raise ValueError(f"Invalid volume specification at position {i}: {e}")
+
+    manager = VolumeViewerManager(volumes)
+    sys.exit(manager.app.exec_())
 
 if __name__ == '__main__':
     main()
