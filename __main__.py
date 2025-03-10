@@ -90,7 +90,7 @@ class VolumeViewer(QMainWindow):
         self.max_input.setText(f"{self.window_level[1]:.2f}")
         slice_data = self.get_current_slice()
         h, w = slice_data.shape
-        self.view_rect = (0.0, float(w), 0.0, float(h))
+        self.view_rect = (0, w, 0, h)
         self.update_display()
 
     def get_current_slice(self):
@@ -171,44 +171,56 @@ class VolumeViewer(QMainWindow):
             # Store initial view rectangle and precise start position
             self.drag_start_view = self.view_rect
             self.drag_start_pos = self.mapToImage(event.pos())
+            self.drag_start_pos_map = event.pos()
             self.dragging = True
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self.dragging and self.drag_btn.isChecked():
             # Get current position in image coordinates
-            current_pos = self.mapToImage(event.pos())
-            
+            current_pos_map = event.pos()
+
+            # Calculate scaling factors
+            widget_rect, image_rect = self.last_pixmap_info
+            scale_x = image_rect.width() / widget_rect.width()
+            scale_y = image_rect.height() / widget_rect.height()
+
             # Calculate delta in image space using floating-point precision
-            dx = self.drag_start_pos.x() - current_pos.x()
-            dy = self.drag_start_pos.y() - current_pos.y()
+            dx = int((self.drag_start_pos_map.x() - current_pos_map.x())*scale_x)
+            dy = int((self.drag_start_pos_map.y() - current_pos_map.y())*scale_y)
             
-            current_width = self.get_current_width()
-            current_height = self.get_current_height()
+            if abs(dx) > 1 or abs(dy) > 1:
+                current_width = self.get_current_width()
+                current_height = self.get_current_height()
 
-            x_min, x_max, y_min, y_max = self.drag_start_view
-            
-            potential_new_x_min = x_min + dx
-            potential_new_x_max = x_max + dx
-            potential_new_y_min = y_min + dy
-            potential_new_y_max = y_max + dy
+                x_min, x_max, y_min, y_max = self.drag_start_view
+                
+                potential_new_x_min = x_min + dx
+                potential_new_x_max = x_max + dx
+                potential_new_y_min = y_min + dy
+                potential_new_y_max = y_max + dy
 
-            if potential_new_x_min >= 0 and potential_new_x_max <= current_width:
-                new_x_min = potential_new_x_min
-                new_x_max = potential_new_x_max
-            else:
-                new_x_min = x_min
-                new_x_max = x_max
-            if potential_new_y_min >= 0 and potential_new_y_max <= current_height:
-                new_y_min = potential_new_y_min
-                new_y_max = potential_new_y_max
-            else:
-                new_y_min = y_min
-                new_y_max = y_max
+                image_needs_update = False
+
+                if potential_new_x_min >= 0 and potential_new_x_max <= current_width:
+                    new_x_min = potential_new_x_min
+                    new_x_max = potential_new_x_max
+                    image_needs_update = True
+                else:
+                    new_x_min = x_min
+                    new_x_max = x_max
+                    
+                if potential_new_y_min >= 0 and potential_new_y_max <= current_height:
+                    new_y_min = potential_new_y_min
+                    new_y_max = potential_new_y_max
+                    image_needs_update = True
+                else:
+                    new_y_min = y_min
+                    new_y_max = y_max
+
+                if image_needs_update:
+                    self.view_rect = (new_x_min, new_x_max, new_y_min, new_y_max)
+                    self.update_display()
             
-            self.view_rect = (new_x_min, new_x_max, new_y_min, new_y_max)
-            #self.drag_start_pos = current_pos
-            self.update_display()
-        
         elif self.zoom_btn.isChecked():
             # Get current position in image coordinates
             current_pos = self.mapToImage(event.pos())
@@ -231,11 +243,19 @@ class VolumeViewer(QMainWindow):
         if self.dragging and self.zoom_btn.isChecked():
             end_pos = self.mapToImage(event.pos())
             
-            x_min = min(self.drag_start_pos.x(), end_pos.x())
-            x_max = max(self.drag_start_pos.x(), end_pos.x())
-            y_min = min(self.drag_start_pos.y(), end_pos.y())
-            y_max = max(self.drag_start_pos.y(), end_pos.y())
+            x_min = int(min(self.drag_start_pos.x(), end_pos.x()))
+            x_max = int(max(self.drag_start_pos.x(), end_pos.x()))
+            y_min = int(min(self.drag_start_pos.y(), end_pos.y()))
+            y_max = int(max(self.drag_start_pos.y(), end_pos.y()))
             
+            current_width = self.get_current_width()
+            current_height = self.get_current_height()
+
+            x_min = clamp(x_min, 0, current_width)
+            x_max = clamp(x_max, 0, current_width)
+            y_min = clamp(y_min, 0, current_height)
+            y_max = clamp(y_max, 0, current_height)
+
             if x_max - x_min > 2 and y_max - y_min > 2:
                 self.view_rect = (x_min, x_max, y_min, y_max)
                 self.update_display()
@@ -245,7 +265,7 @@ class VolumeViewer(QMainWindow):
     def mapToImage(self, pos: QPoint):
         """Convert widget coordinates to image coordinates (floating-point)"""
         if not self.last_pixmap_info:
-            return QPointF(0, 0)
+            return QPoint(0, 0)
             
         widget_rect, image_rect = self.last_pixmap_info
         
@@ -254,12 +274,12 @@ class VolumeViewer(QMainWindow):
         scale_y = image_rect.height() / widget_rect.height()
         
         # Convert coordinates with floating-point precision
-        img_x = (pos.x() - widget_rect.x()) * scale_x + self.view_rect[0]
-        img_y = (pos.y() - widget_rect.y()) * scale_y + self.view_rect[2]
+        img_x = int((pos.x() - widget_rect.x()) * scale_x + self.view_rect[0] + 0.5)
+        img_y = int((pos.y() - widget_rect.y()) * scale_y + self.view_rect[2] + 0.5)
         
-        return QPointF(img_x, img_y)
+        return QPoint(img_x, img_y)
 
-    def mapFromImage(self, pos: QPointF):
+    def mapFromImage(self, pos: QPoint):
         """Convert image coordinates to widget coordinates (floating-point)"""
         if not self.last_pixmap_info:
             return QPointF(0, 0)
@@ -283,6 +303,13 @@ class VolumeViewer(QMainWindow):
     def get_current_height(self):
         slice_data = self.get_current_slice()
         return float(slice_data.shape[0])
+
+def clamp(val, min, max):
+    if val < min:
+        return min
+    if val > max:
+        return max
+    return val
 
 def main():
     parser = argparse.ArgumentParser(
