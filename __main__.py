@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-
 import sys
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QScrollBar, QLineEdit, QLabel, QRadioButton)
+                             QPushButton, QScrollBar, QLineEdit, QLabel, QRadioButton,
+                             QSizePolicy)
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor
-from PyQt5.QtCore import Qt, QRect
+from PyQt5.QtCore import Qt, QRect, QPoint
 
 class VolumeViewer(QMainWindow):
     def __init__(self, volume_data, nx, ny, nz):
@@ -13,8 +13,6 @@ class VolumeViewer(QMainWindow):
         self.volume = volume_data
         self.nx, self.ny, self.nz = nx, ny, nz
         self.current_slice = 0
-        self.current_image_width = 0
-        self.current_image_height = 0
         self.orientation = 0  # 0=XY, 1=XZ, 2=YZ
         self.window_level = [np.min(self.volume), np.max(self.volume)]
         self.zoom_factor = 1.0
@@ -35,8 +33,10 @@ class VolumeViewer(QMainWindow):
         # Zoom/Drag buttons
         self.zoom_btn = QPushButton("Zoom", checkable=True)
         self.drag_btn = QPushButton("Drag", checkable=True)
+        self.reset_btn = QPushButton("Reset")
         self.zoom_btn.clicked.connect(lambda: self.drag_btn.setChecked(False))
         self.drag_btn.clicked.connect(lambda: self.zoom_btn.setChecked(False))
+        self.reset_btn.clicked.connect(self.reset_view)
         
         # Window level controls
         self.min_input = QLineEdit(str(self.window_level[0]))
@@ -56,6 +56,7 @@ class VolumeViewer(QMainWindow):
         # Assemble controls
         control_layout.addWidget(self.zoom_btn)
         control_layout.addWidget(self.drag_btn)
+        control_layout.addWidget(self.reset_btn)
         control_layout.addWidget(QLabel("Min:"))
         control_layout.addWidget(self.min_input)
         control_layout.addWidget(QLabel("Max:"))
@@ -63,25 +64,40 @@ class VolumeViewer(QMainWindow):
         control_layout.addWidget(self.xy_radio)
         control_layout.addWidget(self.xz_radio)
         control_layout.addWidget(self.yz_radio)
+
+        # Image display area with scrollbar
+        image_layout = QHBoxLayout()
         
-        # Image display area
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setMinimumSize(400, 400)
-        
-        # Slice scrollbar
-        self.scrollbar = QScrollBar(Qt.Horizontal)
+        # Vertical scrollbar on the left
+        self.scrollbar = QScrollBar(Qt.Vertical)
         self.scrollbar.setMaximum(self.nz-1)
         self.scrollbar.valueChanged.connect(self.set_slice)
         
+        # Image display
+        self.image_label = QLabel()
+        self.image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setMinimumSize(400, 400)
+
+        image_layout.addWidget(self.scrollbar)
+        image_layout.addWidget(self.image_label)
+
         # Add widgets to main layout
         main_layout.addLayout(control_layout)
-        main_layout.addWidget(self.image_label)
-        main_layout.addWidget(self.scrollbar)
+        main_layout.addLayout(image_layout)
         
         self.update_display()
         self.setWindowTitle('Volume Viewer')
+        self.resize(800, 600)
         self.show()
+
+    def reset_view(self):
+        self.zoom_factor = 1.0
+        self.pan_offset = [0, 0]
+        self.window_level = [np.min(self.volume), np.max(self.volume)]
+        self.min_input.setText(str(self.window_level[0]))
+        self.max_input.setText(str(self.window_level[1]))
+        self.update_display()
 
     def update_display(self):
         # Get current slice data
@@ -94,7 +110,7 @@ class VolumeViewer(QMainWindow):
 
         # Apply window level
         data = np.clip((slice_data - self.window_level[0]) / 
-                    (self.window_level[1] - self.window_level[0]), 0, 1)
+                      (self.window_level[1] - self.window_level[0]), 0, 1)
         data = (data * 255).astype(np.uint8)
 
         # Create QImage
@@ -102,38 +118,34 @@ class VolumeViewer(QMainWindow):
         qimage = QImage(data.data, width, height, width, QImage.Format_Grayscale8)
         pixmap = QPixmap.fromImage(qimage)
         
-        # Apply zoom and pan with integer coordinates
-        scaled_width = int(width * self.zoom_factor)
-        scaled_height = int(height * self.zoom_factor)
+        # Apply zoom without interpolation
         scaled_pixmap = pixmap.scaled(
-            scaled_width,
-            scaled_height,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
+            int(width * self.zoom_factor),
+            int(height * self.zoom_factor),
+            Qt.IgnoreAspectRatio,
+            Qt.FastTransformation
         )
         
-        # Create final pixmap with proper dimensions
+        # Create final pixmap
         final_pixmap = QPixmap(self.image_label.size())
         final_pixmap.fill(Qt.white)
-        
         painter = QPainter(final_pixmap)
         
-        # Convert pan offsets to integers
-        pan_x = int(self.pan_offset[0])
-        pan_y = int(self.pan_offset[1])
+        # Calculate draw coordinates with integer values
+        draw_x = int(self.pan_offset[0])
+        draw_y = int(self.pan_offset[1])
         
-        # Clamp pan values to keep image visible
-        max_pan_x = max(final_pixmap.width() - scaled_width, 0)
-        max_pan_y = max(final_pixmap.height() - scaled_height, 0)
-        pan_x = min(max(pan_x, -scaled_width), max_pan_x)
-        pan_y = min(max(pan_y, -scaled_height), max_pan_y)
+        # Clamp pan values
+        max_x = final_pixmap.width() - scaled_pixmap.width()
+        max_y = final_pixmap.height() - scaled_pixmap.height()
+        draw_x = min(max(draw_x, -scaled_pixmap.width()), max_x)
+        draw_y = min(max(draw_y, -scaled_pixmap.height()), max_y)
         
-        # Draw the scaled pixmap with integer coordinates
-        painter.drawPixmap(pan_x, pan_y, scaled_pixmap)
+        painter.drawPixmap(draw_x, draw_y, scaled_pixmap)
         painter.end()
         
         self.image_label.setPixmap(final_pixmap)
-    
+
     def set_slice(self, value):
         self.current_slice = value
         self.update_display()
@@ -146,6 +158,8 @@ class VolumeViewer(QMainWindow):
             2: self.nx-1
         }[orientation]
         self.scrollbar.setMaximum(max_slice)
+        self.current_slice = min(self.current_slice, max_slice)
+        self.scrollbar.setValue(self.current_slice)
         self.update_display()
 
     def update_window_level(self):
@@ -160,13 +174,13 @@ class VolumeViewer(QMainWindow):
     def mousePressEvent(self, event):
         if self.image_label.underMouse():
             self.drag_start = event.pos()
-            self.drag_start_pan = self.pan_offset.copy()  # Store initial pan
+            self.drag_start_pan = self.pan_offset.copy()
             self.dragging = True
 
     def mouseMoveEvent(self, event):
         if self.dragging and self.drag_start:
             if self.drag_btn.isChecked():
-                # Panning calculation with correct coordinate transformation
+                # Panning
                 delta = event.pos() - self.drag_start
                 self.pan_offset = [
                     self.drag_start_pan[0] + delta.x(),
@@ -174,28 +188,18 @@ class VolumeViewer(QMainWindow):
                 ]
                 self.update_display()
             elif self.zoom_btn.isChecked():
-                # Update display with temporary zoom rectangle
+                # Draw zoom rectangle
                 self.update_display()
                 painter = QPainter(self.image_label.pixmap())
                 painter.setPen(QColor(255, 0, 0))
                 rect = QRect(self.drag_start, event.pos()).normalized()
-                
-                # Convert coordinates to image space
-                img_rect = QRect(
-                    int((rect.x() - self.pan_offset[0]) / self.zoom_factor),
-                    int((rect.y() - self.pan_offset[1]) / self.zoom_factor),
-                    int(rect.width() / self.zoom_factor),
-                    int(rect.height() / self.zoom_factor)
-                )
-                
-                # Draw rectangle in image coordinates
-                painter.drawRect(img_rect)
+                painter.drawRect(rect)
                 painter.end()
                 self.image_label.repaint()
 
     def mouseReleaseEvent(self, event):
         if self.dragging and self.zoom_btn.isChecked():
-            # Convert coordinates to image space
+            # Calculate zoom area in image coordinates
             start_x = (self.drag_start.x() - self.pan_offset[0]) / self.zoom_factor
             start_y = (self.drag_start.y() - self.pan_offset[1]) / self.zoom_factor
             end_x = (event.pos().x() - self.pan_offset[0]) / self.zoom_factor
@@ -206,9 +210,11 @@ class VolumeViewer(QMainWindow):
             
             if rect_width > 10 and rect_height > 10:
                 # Calculate new zoom factor
-                zoom_x = self.image_label.width() / rect_width
-                zoom_y = self.image_label.height() / rect_height
-                self.zoom_factor = min(zoom_x, zoom_y, 5.0)  # Max 5x zoom
+                view_width = self.image_label.width()
+                view_height = self.image_label.height()
+                zoom_x = view_width / rect_width
+                zoom_y = view_height / rect_height
+                self.zoom_factor = min(zoom_x, zoom_y, 5.0)
                 
                 # Calculate new pan offset
                 self.pan_offset = [
@@ -217,18 +223,17 @@ class VolumeViewer(QMainWindow):
                 ]
                 
                 self.update_display()
-    
+
+        self.dragging = False
+        self.drag_start = None
+
 def load_volume(filename, nx, ny, nz):
     return np.fromfile(filename, dtype=np.float32).reshape((nz, ny, nx))
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     
-    # Example usage:
-    # volume = load_volume('volume.raw', 256, 256, 256)
-    # viewer = VolumeViewer(volume, 256, 256, 256)
-    
-    # For testing without real data:
+    # Example usage with dummy data
     dummy_volume = np.random.rand(100, 100, 100).astype(np.float32)
     viewer = VolumeViewer(dummy_volume, 100, 100, 100)
     
