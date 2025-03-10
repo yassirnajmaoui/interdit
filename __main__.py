@@ -244,8 +244,8 @@ class VolumeViewer(QMainWindow):
         scale_y = image_rect.height() / widget_rect.height()
         
         # Convert coordinates
-        img_x = image_rect.x() + (pos.x() - widget_rect.x()) * scale_x
-        img_y = image_rect.y() + (pos.y() - widget_rect.y()) * scale_y
+        img_x = (pos.x() - widget_rect.x()) * scale_x + image_rect.x()
+        img_y = (pos.y() - widget_rect.y()) * scale_y + image_rect.y()
         
         return QPoint(int(img_x), int(img_y))
 
@@ -261,8 +261,8 @@ class VolumeViewer(QMainWindow):
         scale_y = widget_rect.height() / image_rect.height()
         
         # Convert coordinates
-        widget_x = (pos.x() - image_rect.x()) * scale_x
-        widget_y = (pos.y() - image_rect.y()) * scale_y
+        widget_x = (pos.x()) * scale_x
+        widget_y = (pos.y()) * scale_y
         
         return QPoint(int(widget_x), int(widget_y))
 
