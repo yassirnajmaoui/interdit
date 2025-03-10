@@ -1,11 +1,12 @@
 #! /usr/bin/env python
+import argparse
 import sys
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QScrollBar, QLineEdit, QLabel, QRadioButton,
                              QSizePolicy)
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QMouseEvent
-from PyQt5.QtCore import Qt, QRect, QPoint, QSize, QRectF
+from PyQt5.QtCore import Qt, QRect, QPoint, QPointF, QSize, QRectF
 
 class VolumeViewer(QMainWindow):
     def __init__(self, volume_data, nx, ny, nz):
@@ -17,7 +18,7 @@ class VolumeViewer(QMainWindow):
         self.window_level = [np.min(self.volume), np.max(self.volume)]
         self.view_rect = None  # (x_min, x_max, y_min, y_max) in image coordinates
         self.dragging = False
-        self.drag_start = None
+        self.drag_start_pos = None
         self.last_pixmap_info = None  # (pixmap_rect, image_rect)
         self.initUI()
 
@@ -84,10 +85,12 @@ class VolumeViewer(QMainWindow):
         self.reset_view()
 
     def reset_view(self):
-        self.view_rect = None
         self.window_level = [np.min(self.volume), np.max(self.volume)]
         self.min_input.setText(f"{self.window_level[0]:.2f}")
         self.max_input.setText(f"{self.window_level[1]:.2f}")
+        slice_data = self.get_current_slice()
+        h, w = slice_data.shape
+        self.view_rect = (0.0, float(w), 0.0, float(h))
         self.update_display()
 
     def get_current_slice(self):
@@ -107,11 +110,15 @@ class VolumeViewer(QMainWindow):
             self.view_rect = (0, w, 0, h)
             
         x_min, x_max, y_min, y_max = self.view_rect
+        x_min = int(x_min)
+        x_max = int(x_max)
+        y_min = int(y_min)
+        y_max = int(y_max)
         view_w = x_max - x_min
         view_h = y_max - y_min
         
         # Apply window level to the visible region
-        visible_data = slice_data[y_min:y_max, x_min:x_max]
+        visible_data = slice_data[int(y_min):int(y_max), int(x_min):int(x_max)]
         data = np.clip((visible_data - self.window_level[0]) / 
                       (self.window_level[1] - self.window_level[0]), 0, 1)
         data = (data * 255).astype(np.uint8)
@@ -131,7 +138,6 @@ class VolumeViewer(QMainWindow):
             QRectF(self.image_label.x(), self.image_label.y(), canvas_size.width(), canvas_size.height()),
             QRectF(x_min, y_min, view_w, view_h)
         )
-        
 
     def set_slice(self, value):
         self.current_slice = value
@@ -162,80 +168,84 @@ class VolumeViewer(QMainWindow):
 
     def mousePressEvent(self, event: QMouseEvent):
         if self.image_label.underMouse():
-            self.drag_start = self.mapToImage(event.pos())
+            # Store initial view rectangle and precise start position
+            self.drag_start_view = self.view_rect
+            self.drag_start_pos = self.mapToImage(event.pos())
             self.dragging = True
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        if self.dragging and self.drag_start:
+        if self.dragging and self.drag_btn.isChecked():
+            # Get current position in image coordinates
             current_pos = self.mapToImage(event.pos())
             
-            if self.drag_btn.isChecked():
-                # Panning calculation in image coordinates
-                dx = self.drag_start.x() - current_pos.x()
-                dy = self.drag_start.y() - current_pos.y()
+            # Calculate delta in image space using floating-point precision
+            dx = self.drag_start_pos.x() - current_pos.x()
+            dy = self.drag_start_pos.y() - current_pos.y()
+            
+            current_width = self.get_current_width()
+            current_height = self.get_current_height()
 
-                current_width = self.get_current_width()
-                current_height = self.get_current_height()
+            x_min, x_max, y_min, y_max = self.drag_start_view
+            
+            potential_new_x_min = x_min + dx
+            potential_new_x_max = x_max + dx
+            potential_new_y_min = y_min + dy
+            potential_new_y_max = y_max + dy
 
-                x_min, x_max, y_min, y_max = self.view_rect
-                
-                potential_new_x_min = x_min + dx
-                potential_new_x_max = x_max + dx
-                potential_new_y_min = y_min + dy
-                potential_new_y_max = y_max + dy
-
-                if potential_new_x_min >= 0 and potential_new_x_max <= current_width:
-                    new_x_min = potential_new_x_min
-                    new_x_max = potential_new_x_max
-                else:
-                    new_x_min = x_min
-                    new_x_max = x_max
-                if potential_new_y_min >= 0 and potential_new_y_max <= current_height:
-                    new_y_min = potential_new_y_min
-                    new_y_max = potential_new_y_max
-                else:
-                    new_y_min = y_min
-                    new_y_max = y_max
-                
-                self.view_rect = (new_x_min, new_x_max, new_y_min, new_y_max)
-                self.drag_start = current_pos
-                self.update_display()
-                
-            elif self.zoom_btn.isChecked():
-                # Draw zoom rectangle directly on image coordinates
-                self.update_display()
-                painter = QPainter(self.image_label.pixmap())
-                painter.setPen(QColor(255, 0, 0))
-                
-                # Convert coordinates to widget space
-                start = self.mapFromImage(self.drag_start)
-                end = self.mapFromImage(current_pos)
-                rect = QRect(start, end).normalized()
-                
-                painter.drawRect(rect)
-                painter.end()
-                self.image_label.repaint()
-
+            if potential_new_x_min >= 0 and potential_new_x_max <= current_width:
+                new_x_min = potential_new_x_min
+                new_x_max = potential_new_x_max
+            else:
+                new_x_min = x_min
+                new_x_max = x_max
+            if potential_new_y_min >= 0 and potential_new_y_max <= current_height:
+                new_y_min = potential_new_y_min
+                new_y_max = potential_new_y_max
+            else:
+                new_y_min = y_min
+                new_y_max = y_max
+            
+            self.view_rect = (new_x_min, new_x_max, new_y_min, new_y_max)
+            #self.drag_start_pos = current_pos
+            self.update_display()
+        
+        elif self.zoom_btn.isChecked():
+            # Get current position in image coordinates
+            current_pos = self.mapToImage(event.pos())
+            
+            # Draw zoom rectangle directly on image coordinates
+            self.update_display()
+            painter = QPainter(self.image_label.pixmap())
+            painter.setPen(QColor(255, 0, 0))
+            
+            # Convert coordinates to widget space
+            start = self.mapFromImage(self.drag_start_pos)
+            end = self.mapFromImage(current_pos)
+            rect = QRectF(start, end).normalized()
+            
+            painter.drawRect(rect)
+            painter.end()
+            self.image_label.repaint()
+        
     def mouseReleaseEvent(self, event: QMouseEvent):
         if self.dragging and self.zoom_btn.isChecked():
             end_pos = self.mapToImage(event.pos())
             
-            x_min = int(min(self.drag_start.x(), end_pos.x()))
-            x_max = int(max(self.drag_start.x(), end_pos.x()))
-            y_min = int(min(self.drag_start.y(), end_pos.y()))
-            y_max = int(max(self.drag_start.y(), end_pos.y()))
+            x_min = min(self.drag_start_pos.x(), end_pos.x())
+            x_max = max(self.drag_start_pos.x(), end_pos.x())
+            y_min = min(self.drag_start_pos.y(), end_pos.y())
+            y_max = max(self.drag_start_pos.y(), end_pos.y())
             
             if x_max - x_min > 2 and y_max - y_min > 2:
                 self.view_rect = (x_min, x_max, y_min, y_max)
                 self.update_display()
 
         self.dragging = False
-        self.drag_start = None
 
     def mapToImage(self, pos: QPoint):
-        """Convert widget coordinates to image coordinates"""
+        """Convert widget coordinates to image coordinates (floating-point)"""
         if not self.last_pixmap_info:
-            return QPoint(0, 0)
+            return QPointF(0, 0)
             
         widget_rect, image_rect = self.last_pixmap_info
         
@@ -243,16 +253,16 @@ class VolumeViewer(QMainWindow):
         scale_x = image_rect.width() / widget_rect.width()
         scale_y = image_rect.height() / widget_rect.height()
         
-        # Convert coordinates
-        img_x = (pos.x() - widget_rect.x()) * scale_x + image_rect.x()
-        img_y = (pos.y() - widget_rect.y()) * scale_y + image_rect.y()
+        # Convert coordinates with floating-point precision
+        img_x = (pos.x() - widget_rect.x()) * scale_x + self.view_rect[0]
+        img_y = (pos.y() - widget_rect.y()) * scale_y + self.view_rect[2]
         
-        return QPoint(int(img_x), int(img_y))
+        return QPointF(img_x, img_y)
 
-    def mapFromImage(self, pos: QPoint):
-        """Convert image coordinates to widget coordinates"""
+    def mapFromImage(self, pos: QPointF):
+        """Convert image coordinates to widget coordinates (floating-point)"""
         if not self.last_pixmap_info:
-            return QPoint(0, 0)
+            return QPointF(0, 0)
             
         widget_rect, image_rect = self.last_pixmap_info
         
@@ -260,29 +270,71 @@ class VolumeViewer(QMainWindow):
         scale_x = widget_rect.width() / image_rect.width()
         scale_y = widget_rect.height() / image_rect.height()
         
-        # Convert coordinates
-        widget_x = (pos.x()) * scale_x
-        widget_y = (pos.y()) * scale_y
+        # Convert coordinates with floating-point precision
+        widget_x = (pos.x() - image_rect.x()) * scale_x
+        widget_y = (pos.y() - image_rect.y()) * scale_y
         
-        return QPoint(int(widget_x), int(widget_y))
+        return QPointF(widget_x, widget_y)
 
     def get_current_width(self):
         slice_data = self.get_current_slice()
-        return slice_data.shape[1]
+        return float(slice_data.shape[1])
 
     def get_current_height(self):
         slice_data = self.get_current_slice()
-        return slice_data.shape[0]
+        return float(slice_data.shape[0])
 
+def main():
+    parser = argparse.ArgumentParser(
+        description="3D Volume Viewer",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        "input_file",
+        type=str,
+        help="Path to raw volume file (float32 binary)"
+    )
+    parser.add_argument(
+        "nx", type=int,
+        help="Size in X dimension (width)"
+    )
+    parser.add_argument(
+        "ny", type=int,
+        help="Size in Y dimension (height)"
+    )
+    parser.add_argument(
+        "nz", type=int,
+        help="Size in Z dimension (depth)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Validate arguments
+    if args.nx <= 0 or args.ny <= 0 or args.nz <= 0:
+        raise ValueError("All dimensions must be positive integers")
+    
+    try:
+        volume = load_volume(args.input_file, args.nx, args.ny, args.nz)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Input file not found: {args.input_file}")
+    
+    app = QApplication(sys.argv)
+    viewer = VolumeViewer(volume, args.nx, args.ny, args.nz)
+    sys.exit(app.exec_())
 
 def load_volume(filename, nx, ny, nz):
-    return np.fromfile(filename, dtype=np.float32).reshape((nz, ny, nx))
+    """Load volume from raw binary file"""
+    try:
+        data = np.fromfile(filename, dtype=np.float32)
+        expected_size = nx * ny * nz
+        if len(data) != expected_size:
+            raise ValueError(
+                f"File size mismatch. Expected {expected_size} elements "
+                f"({nx}x{ny}x{nz}), got {len(data)}"
+            )
+        return data.reshape((nz, ny, nx))  # Note ZYX ordering for numpy
+    except Exception as e:
+        raise RuntimeError(f"Error loading volume: {str(e)}")
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    
-    # Example with test data
-    dummy_volume = np.random.rand(100, 100, 100).astype(np.float32)
-    viewer = VolumeViewer(dummy_volume, 100, 100, 100)
-    
-    sys.exit(app.exec_())
+    main()
