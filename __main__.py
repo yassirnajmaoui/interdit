@@ -337,12 +337,24 @@ class VolumeViewer(QMainWindow):
 
 
 class SyncControl(QDialog):
+    sync_toggled = pyqtSignal(str, bool)  # (sync_type, checked)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout()
+        
         self.intensity_sync = QCheckBox("Sync Intensity")
         self.view_sync = QCheckBox("Sync View")
         self.slice_sync = QCheckBox("Sync Slice")
+        
+        # Connect checkboxes to signal
+        for cb, name in [(self.intensity_sync, "intensity"),
+                         (self.view_sync, "view"),
+                         (self.slice_sync, "slice")]:
+            cb.stateChanged.connect(
+                lambda state, n=name: self.sync_toggled.emit(n, state == Qt.Checked)
+            )
+        
         layout.addWidget(self.intensity_sync)
         layout.addWidget(self.view_sync)
         layout.addWidget(self.slice_sync)
@@ -364,7 +376,31 @@ class VolumeViewerManager:
             viewer.show()
             self._connect_viewer_signals(viewer)
             self.viewers.append(viewer)
+        
+        # Connect sync toggles
+        self.sync_control.sync_toggled.connect(self.handle_sync_toggled)
 
+    def handle_sync_toggled(self, sync_type, checked):
+        if not checked or not self.viewers:
+            return
+            
+        # Get reference viewer (first viewer)
+        ref_viewer = self.viewers[0]
+        
+        # Sync all viewers to reference viewer's state
+        if sync_type == "intensity":
+            wl = (ref_viewer.window_level[0], ref_viewer.window_level[1])
+            for viewer in self.viewers[1:]:
+                viewer.set_window_level(*wl, internal=True)
+        elif sync_type == "view":
+            vr = ref_viewer.view_rect
+            for viewer in self.viewers[1:]:
+                viewer.set_view_rect(vr, internal=True)
+        elif sync_type == "slice":
+            sl = ref_viewer.current_slice
+            for viewer in self.viewers[1:]:
+                viewer.set_slice(sl, internal=True)
+    
     def _connect_viewer_signals(self, viewer):
         viewer.intensity_changed.connect(
             lambda wl: self._propagate_intensity(viewer, wl))
@@ -383,13 +419,45 @@ class VolumeViewerManager:
         if self.sync_control.view_sync.isChecked():
             for viewer in self.viewers:
                 if viewer != source:
-                    viewer.set_view_rect(view_rect, internal=True)
-
+                    # Convert view rect to target viewer's coordinate system
+                    target_width = viewer.get_current_width()
+                    target_height = viewer.get_current_height()
+                    
+                    # Calculate relative view rect
+                    rel_x_min = view_rect[0] / source.get_current_width()
+                    rel_x_max = view_rect[1] / source.get_current_width()
+                    rel_y_min = view_rect[2] / source.get_current_height()
+                    rel_y_max = view_rect[3] / source.get_current_height()
+                    
+                    # Apply to target
+                    new_vr = (
+                        rel_x_min * target_width,
+                        rel_x_max * target_width,
+                        rel_y_min * target_height,
+                        rel_y_max * target_height
+                    )
+                    viewer.set_view_rect(new_vr, internal=True)
+    
     def _propagate_slice(self, source, slice_idx):
         if self.sync_control.slice_sync.isChecked():
+            source_max = {
+                0: source.nz-1,
+                1: source.ny-1,
+                2: source.nx-1
+            }[source.orientation]
+            
+            rel_slice = slice_idx / source_max
+            
             for viewer in self.viewers:
                 if viewer != source:
-                    viewer.set_slice(slice_idx, internal=True)
+                    viewer_max = {
+                        0: viewer.nz-1,
+                        1: viewer.ny-1,
+                        2: viewer.nx-1
+                    }[viewer.orientation]
+                    
+                    new_slice = min(int(rel_slice * viewer_max), viewer_max)
+                    viewer.set_slice(new_slice, internal=True)
 
 def clamp(val, min, max):
     if val < min:
