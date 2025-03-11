@@ -126,11 +126,11 @@ class VolumeViewer(QMainWindow):
         self.show()
         self.reset_view()
 
-    def reset_view(self):
+    def reset_view(self, internal=False):
         slice_data = self.get_current_slice()
         h, w = slice_data.shape
-        self.view_rect = (0, w, 0, h)
-        self.update_display()
+        new_view_rect = (0, w, 0, h)
+        self.set_view_rect(new_view_rect, internal=internal)
 
     def get_current_slice(self):
         if self.orientation == 0:  # XY
@@ -486,7 +486,7 @@ class VolumeViewerManager:
     def _propagate_view_rect(self, source, view_rect):
         if self.sync_control.view_sync.isChecked():
             for viewer in self.viewers:
-                if viewer != source:
+                if viewer != source and viewer.orientation == source.orientation:
                     # Convert view rect to target viewer's coordinate system
                     target_width = viewer.get_current_width()
                     target_height = viewer.get_current_height()
