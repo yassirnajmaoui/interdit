@@ -30,10 +30,11 @@ class VolumeViewer(QMainWindow):
     slice_changed = pyqtSignal(int)
     orientation_changed = pyqtSignal(int)
 
-    def __init__(self, volume_data, nx, ny, nz):
+    def __init__(self, volume_data):
         super().__init__()
         self.volume = volume_data
-        self.nx, self.ny, self.nz = nx, ny, nz
+        volume_shape = self.volume.shape
+        self.nx, self.ny, self.nz = volume_shape[-1], volume_shape[-2], volume_shape[-3]
         self.current_slice = 0
         self.orientation = 0  # 0=XY, 1=XZ, 2=YZ
         self.window_level = [np.min(self.volume), np.max(self.volume)]
@@ -401,6 +402,7 @@ class SyncControl(QDialog):
             (self.view_sync, "view"),
             (self.slice_sync, "slice"),
         ]:
+            cb.setChecked(True)
             cb.stateChanged.connect(
                 lambda state, n=name: self.sync_toggled.emit(n, state == Qt.Checked)
             )
@@ -422,8 +424,8 @@ class VolumeViewerManager:
         self.sync_control.show()
 
         # Create viewers
-        for vol_data, nx, ny, nz in volumes:
-            viewer = VolumeViewer(vol_data, nx, ny, nz)
+        for volume in volumes:
+            viewer = VolumeViewer(volume)
             viewer.show()
             self._connect_viewer_signals(viewer)
             self.viewers.append(viewer)
